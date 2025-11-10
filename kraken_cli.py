@@ -195,19 +195,54 @@ def ticker(ctx, base, quote, pair):
         
         # Get ticker data from result field (2025 API format)
         result_data = ticker_data.get('result', {})
-        pair_data = result_data.get(trading_pair, {})
         
-        if pair_data:
+        # Find the actual pair data - Kraken may return data with different keys
+        pair_data = None
+        actual_pair_key = None
+        
+        # First, try exact match
+        if trading_pair in result_data:
+            pair_data = result_data[trading_pair]
+            actual_pair_key = trading_pair
+        else:
+            # Look for alternate formats
+            # Common conversions: XBTUSD -> XXBTZUSD, ETHUSD -> XETHZUSD
+            alt_formats = []
+            if 'XBT' in trading_pair and 'USD' in trading_pair:
+                alt_formats = [trading_pair.replace('XBT', 'XXBT').replace('USD', 'ZUSD'), 
+                              trading_pair.replace('XBT', 'XXBTZ').replace('USD', 'ZUSD')]
+            elif 'XETH' in trading_pair and 'USD' in trading_pair:
+                alt_formats = [trading_pair.replace('XETH', 'XETH').replace('USD', 'ZUSD'),
+                              trading_pair.replace('XETH', 'XETHZ').replace('USD', 'ZUSD')]
+            
+            # Try alternate formats
+            for alt_format in alt_formats:
+                if alt_format in result_data:
+                    pair_data = result_data[alt_format]
+                    actual_pair_key = alt_format
+                    break
+            
+            # If still not found, list available pairs for debugging
+            if pair_data is None:
+                available_pairs = list(result_data.keys())
+                console.print(f"[red]❌ No ticker data found for {trading_pair}[/red]")
+                console.print(f"[yellow]Available pairs: {len(available_pairs)} pairs found[/yellow]")
+                if len(available_pairs) <= 10:  # Only show if reasonable number
+                    console.print(f"[dim]Sample pairs: {', '.join(available_pairs[:5])}[/dim]")
+                console.print("[yellow]💡 Try a different pair or check available pairs[/yellow]")
+                return
+        
+        if pair_data and actual_pair_key:
             # Extract data from API response
             current_price = float(pair_data.get('c', ['0', ''])[0] or 0)
-            vwap_24h = float(pair_data.get('p', ['0', ''])[0] or 0)  # Volume weighted average
+            vwap_24h = float(pair_data.get('p', ['0', ''])[1] or 0)  # VWAP is index 1
             high_24h = pair_data.get('h', ['0', ''])[0]
             low_24h = pair_data.get('l', ['0', ''])[0]
             volume_24h = pair_data.get('v', ['0', ''])[0]
             bid_price = pair_data.get('b', ['0', ''])[0]
             ask_price = pair_data.get('a', ['0', ''])[0]
             
-            # Calculate 24h percentage change
+            # Calculate 24h percentage change using VWAP
             if current_price > 0 and vwap_24h > 0:
                 percentage_change = ((current_price - vwap_24h) / vwap_24h) * 100
                 if percentage_change >= 0:
@@ -234,9 +269,6 @@ def ticker(ctx, base, quote, pair):
                 border_style="blue"
             )
             console.print(panel)
-        else:
-            console.print(f"[red]❌ No ticker data found for {trading_pair}[/red]")
-            console.print("[yellow]💡 Try a different pair or check available trading pairs[/yellow]")
             
     except Exception as e:
         console.print(f"[red]❌ Error fetching ticker: {str(e)}[/red]")
