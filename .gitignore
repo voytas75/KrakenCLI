@@ -27,7 +27,6 @@ static/
 groupchat/
 logs/
 local_cache/
-config.py
 knowledge/
 .env
 .venv/
