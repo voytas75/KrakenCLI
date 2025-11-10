@@ -77,6 +77,28 @@ def cli(ctx):
     else:
         # No credentials available
         ctx.obj['api_client'] = None
+    
+    # Initialize portfolio manager if API client is available
+    try:
+        if ctx.obj['api_client'] is not None:
+            portfolio = PortfolioManager(api_client=ctx.obj['api_client'])
+            ctx.obj['portfolio'] = portfolio
+        else:
+            ctx.obj['portfolio'] = None
+    except Exception as e:
+        # If portfolio creation fails, store None
+        ctx.obj['portfolio'] = None
+    
+    # Initialize trader if API client is available
+    try:
+        if ctx.obj['api_client'] is not None:
+            trader = Trader(api_client=ctx.obj['api_client'])
+            ctx.obj['trader'] = trader
+        else:
+            ctx.obj['trader'] = None
+    except Exception as e:
+        # If trader creation fails, store None
+        ctx.obj['trader'] = None
 
 @cli.command()
 @click.pass_context
@@ -285,7 +307,31 @@ def ticker(ctx, base, quote, pair):
 @click.pass_context
 def order(ctx, pair, side, order_type, volume, price, price2, validate):
     """Place a new order"""
-    trader = ctx.obj['trader']
+    # Get trader from context, or create if not available
+    trader = ctx.obj.get('trader')
+    
+    if trader is None:
+        # Check if API credentials are configured and create trader
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+        
+        try:
+            # Get API client first
+            api_client = ctx.obj.get('api_client')
+            if api_client is None:
+                api_client = KrakenAPIClient(
+                    api_key=config.api_key,
+                    api_secret=config.api_secret,
+                    sandbox=config.sandbox
+                )
+            
+            trader = Trader(api_client=api_client)
+        except Exception as e:
+            console.print(f"[red]❌ Failed to initialize trader: {e}[/red]")
+            return
     
     try:
         console.print(f"[bold blue]📝 Placing {side} order for {pair}...[/bold blue]")
@@ -344,7 +390,31 @@ def order(ctx, pair, side, order_type, volume, price, price2, validate):
 @click.pass_context
 def orders(ctx, status, trades):
     """Show current orders or trade history"""
-    portfolio = ctx.obj['portfolio']
+    # Get portfolio from context, or create if not available
+    portfolio = ctx.obj.get('portfolio')
+    
+    if portfolio is None:
+        # Check if API credentials are configured and create portfolio
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+        
+        try:
+            # Get API client first
+            api_client = ctx.obj.get('api_client')
+            if api_client is None:
+                api_client = KrakenAPIClient(
+                    api_key=config.api_key,
+                    api_secret=config.api_secret,
+                    sandbox=config.sandbox
+                )
+            
+            portfolio = PortfolioManager(api_client=api_client)
+        except Exception as e:
+            console.print(f"[red]❌ Failed to initialize portfolio manager: {e}[/red]")
+            return
     
     try:
         if trades:
@@ -409,7 +479,31 @@ def orders(ctx, status, trades):
 @click.pass_context
 def cancel(ctx, cancel_all, txid):
     """Cancel orders"""
-    trader = ctx.obj['trader']
+    # Get trader from context, or create if not available
+    trader = ctx.obj.get('trader')
+    
+    if trader is None:
+        # Check if API credentials are configured and create trader
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+        
+        try:
+            # Get API client first
+            api_client = ctx.obj.get('api_client')
+            if api_client is None:
+                api_client = KrakenAPIClient(
+                    api_key=config.api_key,
+                    api_secret=config.api_secret,
+                    sandbox=config.sandbox
+                )
+            
+            trader = Trader(api_client=api_client)
+        except Exception as e:
+            console.print(f"[red]❌ Failed to initialize trader: {e}[/red]")
+            return
     
     try:
         if cancel_all:
@@ -440,7 +534,26 @@ def cancel(ctx, cancel_all, txid):
 @click.pass_context
 def info(ctx, pairs):
     """Show Kraken market information"""
-    api_client = ctx.obj['api_client']
+    # Get API client from context, or create if not available
+    api_client = ctx.obj.get('api_client')
+    
+    if api_client is None:
+        # Check if API credentials are configured and create client
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+        
+        try:
+            api_client = KrakenAPIClient(
+                api_key=config.api_key,
+                api_secret=config.api_secret,
+                sandbox=config.sandbox
+            )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to initialize API client: {e}[/red]")
+            return
     
     try:
         if pairs:
@@ -499,7 +612,31 @@ def info(ctx, pairs):
 @click.pass_context
 def portfolio(ctx, pair):
     """Show portfolio overview"""
-    portfolio = ctx.obj['portfolio']
+    # Get portfolio from context, or create if not available
+    portfolio = ctx.obj.get('portfolio')
+    
+    if portfolio is None:
+        # Check if API credentials are configured and create portfolio
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+        
+        try:
+            # Get API client first
+            api_client = ctx.obj.get('api_client')
+            if api_client is None:
+                api_client = KrakenAPIClient(
+                    api_key=config.api_key,
+                    api_secret=config.api_secret,
+                    sandbox=config.sandbox
+                )
+            
+            portfolio = PortfolioManager(api_client=api_client)
+        except Exception as e:
+            console.print(f"[red]❌ Failed to initialize portfolio manager: {e}[/red]")
+            return
     
     try:
         console.print("[bold blue]💼 Portfolio Overview[/bold blue]")
