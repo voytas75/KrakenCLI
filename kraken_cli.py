@@ -457,6 +457,26 @@ def orders(ctx, status, trades, verbose):
             orders_data = portfolio.get_open_orders()
             
             if orders_data:
+                if verbose:
+                    console.print(f"[dim]🔍 Debug: orders_data type: {type(orders_data)}[/dim]")
+                    console.print(f"[dim]🔍 Debug: orders_data keys: {list(orders_data.keys())}[/dim]")
+                    if len(orders_data) > 0:
+                        first_key = list(orders_data.keys())[0]
+                        first_value = orders_data[first_key]
+                        console.print(f"[dim]🔍 Debug: First key: {first_key}[/dim]")
+                        console.print(f"[dim]🔍 Debug: First value type: {type(first_value)}[/dim]")
+                        if isinstance(first_value, dict):
+                            console.print(f"[dim]🔍 Debug: First value keys: {list(first_value.keys())}[/dim]")
+                
+                # Handle different possible response structures
+                # Structure 1: {"O123": {...}, "O456": {...}}
+                # Structure 2: {"open": {"O123": {...}, "O456": {...}}}
+                actual_orders = orders_data
+                if 'open' in orders_data and isinstance(orders_data['open'], dict):
+                    actual_orders = orders_data['open']
+                    if verbose:
+                        console.print(f"[dim]🔍 Debug: Using 'open' sub-dictionary with {len(actual_orders)} orders[/dim]")
+                
                 table = Table(title="Open Orders")
                 table.add_column("Time", style="cyan")
                 table.add_column("Pair", style="green")
@@ -465,35 +485,52 @@ def orders(ctx, status, trades, verbose):
                 table.add_column("Volume", style="magenta")
                 table.add_column("Price", style="red")
                 
-                for order_id, order in orders_data.items():
-                    # Debug: Print the order structure to understand the format (only in verbose mode)
-                    if verbose and order_id == list(orders_data.keys())[0]:  # Print structure for first order only
-                        console.print(f"[dim]🔍 Debug: Order structure for {order_id}: {list(order.keys())}[/dim]")
-                        console.print(f"[dim]🔍 Debug: Descr structure: {list(order.get('descr', {}).keys())}[/dim]")
+                first_processed = False
+                for order_id, order in actual_orders.items():
+                    # Check if this is the first order and we need verbose output
+                    is_first = not first_processed
                     
                     # Extract data from the correct structure
                     descr = order.get('descr', {})
                     
+                    # Debug: Print extraction details (only for first order in verbose mode)
+                    if verbose and is_first:
+                        console.print(f"[dim]🔍 Debug: Processing order {order_id}[/dim]")
+                        console.print(f"[dim]🔍 Debug: order keys: {list(order.keys()) if isinstance(order, dict) else order}[/dim]")
+                        console.print(f"[dim]🔍 Debug: descr keys: {list(descr.keys()) if isinstance(descr, dict) else descr}[/dim]")
+                        console.print(f"[dim]🔍 Debug: opentm: {order.get('opentm') if isinstance(order, dict) else 'N/A'}[/dim]")
+                        console.print(f"[dim]🔍 Debug: vol: {order.get('vol') if isinstance(order, dict) else 'N/A'}[/dim]")
+                    
                     # Extract time - convert timestamp to readable format
-                    time_val = order.get('opentm', 'N/A')
+                    time_val = order.get('opentm', 'N/A') if isinstance(order, dict) else 'N/A'
+                    if verbose and is_first:
+                        console.print(f"[dim]🔍 Debug: raw time_val: {time_val} (type: {type(time_val)})[/dim]")
+                    
                     if isinstance(time_val, (int, float)):
                         from datetime import datetime
                         time_val = datetime.fromtimestamp(time_val).strftime('%Y-%m-%d %H:%M:%S')
                     
                     # Extract pair - from descr
-                    pair_val = descr.get('pair', 'N/A')
+                    pair_val = descr.get('pair', 'N/A') if isinstance(descr, dict) else 'N/A'
                     
                     # Extract order side/type - from descr
-                    side_val = descr.get('type', 'N/A')
+                    side_val = descr.get('type', 'N/A') if isinstance(descr, dict) else 'N/A'
                     
                     # Extract order type - from descr
-                    type_val = descr.get('ordertype', 'N/A')
+                    type_val = descr.get('ordertype', 'N/A') if isinstance(descr, dict) else 'N/A'
                     
                     # Extract volume - direct from order
-                    vol_val = order.get('vol', 'N/A')
+                    vol_val = order.get('vol', 'N/A') if isinstance(order, dict) else 'N/A'
                     
                     # Extract price - from descr
-                    price_val = descr.get('price', 'N/A')
+                    price_val = descr.get('price', 'N/A') if isinstance(descr, dict) else 'N/A'
+                    
+                    # Debug: Print final extracted values (only for first order in verbose mode)
+                    if verbose and is_first:
+                        console.print(f"[dim]🔍 Debug: final values: time={time_val}, pair={pair_val}, side={side_val}, type={type_val}, vol={vol_val}, price={price_val}[/dim]")
+                    
+                    # Mark first order as processed
+                    first_processed = True
                     
                     # Convert all values to strings to avoid Rich rendering issues
                     table.add_row(
