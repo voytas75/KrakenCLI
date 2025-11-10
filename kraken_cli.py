@@ -469,38 +469,31 @@ def orders(ctx, status, trades, verbose):
                     # Debug: Print the order structure to understand the format (only in verbose mode)
                     if verbose and order_id == list(orders_data.keys())[0]:  # Print structure for first order only
                         console.print(f"[dim]🔍 Debug: Order structure for {order_id}: {list(order.keys())}[/dim]")
-                        console.print(f"[dim]🔍 Debug: Full first order: {order}[/dim]")
+                        console.print(f"[dim]🔍 Debug: Descr structure: {list(order.get('descr', {}).keys())}[/dim]")
                     
-                    # Try multiple possible data structures for robustness
+                    # Extract data from the correct structure
                     descr = order.get('descr', {})
                     
-                    # Extract time - try multiple possible field names
-                    time_val = order.get('opentm') or order.get('opentime') or order.get('time') or 'N/A'
+                    # Extract time - convert timestamp to readable format
+                    time_val = order.get('opentm', 'N/A')
+                    if isinstance(time_val, (int, float)):
+                        from datetime import datetime
+                        time_val = datetime.fromtimestamp(time_val).strftime('%Y-%m-%d %H:%M:%S')
                     
-                    # Extract pair - try multiple possible paths
-                    pair_val = (descr.get('pair') or 
-                               order.get('pair') or 
-                               order.get('descr', {}).get('pair') or 'N/A')
+                    # Extract pair - from descr
+                    pair_val = descr.get('pair', 'N/A')
                     
-                    # Extract order side/type - try multiple possible paths  
-                    side_val = (descr.get('type') or 
-                               order.get('type') or 
-                               order.get('side') or 'N/A')
+                    # Extract order side/type - from descr
+                    side_val = descr.get('type', 'N/A')
                     
-                    # Extract order type - try multiple possible paths
-                    type_val = (descr.get('ordertype') or 
-                               order.get('ordertype') or 
-                               order.get('type') or 'N/A')
+                    # Extract order type - from descr
+                    type_val = descr.get('ordertype', 'N/A')
                     
-                    # Extract volume - try multiple possible paths
-                    vol_val = (order.get('vol') or 
-                              order.get('volume') or 
-                              order.get('amount') or 'N/A')
+                    # Extract volume - direct from order
+                    vol_val = order.get('vol', 'N/A')
                     
-                    # Extract price - try multiple possible paths
-                    price_val = (descr.get('price') or 
-                               order.get('price') or 
-                               descr.get('price2') or 'N/A')
+                    # Extract price - from descr
+                    price_val = descr.get('price', 'N/A')
                     
                     # Convert all values to strings to avoid Rich rendering issues
                     table.add_row(
