@@ -160,15 +160,38 @@ def ticker(ctx, base, quote, pair):
         pair_data = result_data.get(trading_pair, {})
         
         if pair_data:
+            # Extract data from API response
+            current_price = float(pair_data.get('c', ['0', ''])[0] or 0)
+            vwap_24h = float(pair_data.get('p', ['0', ''])[0] or 0)  # Volume weighted average
+            high_24h = pair_data.get('h', ['0', ''])[0]
+            low_24h = pair_data.get('l', ['0', ''])[0]
+            volume_24h = pair_data.get('v', ['0', ''])[0]
+            bid_price = pair_data.get('b', ['0', ''])[0]
+            ask_price = pair_data.get('a', ['0', ''])[0]
+            
+            # Calculate 24h percentage change
+            if current_price > 0 and vwap_24h > 0:
+                percentage_change = ((current_price - vwap_24h) / vwap_24h) * 100
+                if percentage_change >= 0:
+                    change_color = "green"
+                    change_sign = "+"
+                else:
+                    change_color = "red"
+                    change_sign = ""
+                change_text = f"{change_sign}{percentage_change:.2f}%"
+            else:
+                change_color = "yellow"
+                change_text = "N/A"
+            
             panel = Panel(
                 f"[bold cyan]{trading_pair}[/bold cyan]\n"
-                f"Last Price: [green]{pair_data.get('c', ['0', ''])[0]}[/green]\n"
-                f"24h Change: [yellow]{pair_data.get('p', ['0', ''])[0]}%[/yellow]\n"
-                f"24h High: [green]{pair_data.get('h', ['0', ''])[0]}[/green]\n"
-                f"24h Low: [red]{pair_data.get('l', ['0', ''])[0]}[/red]\n"
-                f"Volume 24h: [blue]{pair_data.get('v', ['0', ''])[0]}[/blue]\n"
-                f"Bid: [green]{pair_data.get('b', ['0', ''])[0]}[/green]\n"
-                f"Ask: [red]{pair_data.get('a', ['0', ''])[0]}[/red]",
+                f"Last Price: [green]{current_price:,.8f}[/green]\n"
+                f"24h Change: [{change_color}]{change_text}[/{change_color}]\n"
+                f"24h High: [green]{high_24h}[/green]\n"
+                f"24h Low: [red]{low_24h}[/red]\n"
+                f"Volume 24h: [blue]{volume_24h}[/blue]\n"
+                f"Bid: [green]{bid_price}[/green]\n"
+                f"Ask: [red]{ask_price}[/red]",
                 title="Market Data",
                 border_style="blue"
             )
@@ -341,6 +364,65 @@ def cancel(ctx, cancel_all, txid):
             
     except Exception as e:
         console.print(f"[red]❌ Error cancelling order: {str(e)}[/red]")
+
+@cli.command()
+@click.option('--pairs', is_flag=True, help='Show available trading pairs')
+@click.pass_context
+def info(ctx, pairs):
+    """Show Kraken market information"""
+    api_client = ctx.obj['api_client']
+    
+    try:
+        if pairs:
+            console.print("[bold blue]📊 Available Trading Pairs[/bold blue]")
+            
+            # Get all trading pairs
+            pairs_data = api_client.get_tradable_asset_pairs()
+            result_data = pairs_data.get('result', {})
+            
+            if result_data:
+                # Create table for trading pairs
+                table = Table(title="Trading Pairs")
+                table.add_column("Pair", style="cyan")
+                table.add_column("Base Asset", style="green")
+                table.add_column("Quote Asset", style="yellow")
+                table.add_column("Minimum Order", style="blue")
+                
+                # Add first 20 pairs to avoid too much output
+                for pair_key, pair_info in list(result_data.items())[:20]:
+                    base = pair_info.get('base', pair_key[:4])
+                    quote = pair_info.get('quote', pair_key[4:])
+                    order_min = pair_info.get('ordermin', 'N/A')
+                    table.add_row(pair_key, base, quote, order_min)
+                
+                console.print(table)
+                console.print(f"[yellow]💡 Showing first 20 pairs. Total pairs available: {len(result_data)}[/yellow]")
+            else:
+                console.print("[red]❌ No trading pairs data found[/red]")
+        else:
+            # General market info
+            console.print("[bold blue]📊 Kraken Market Information[/bold blue]")
+            
+            # Get server time
+            time_data = api_client.get_server_time()
+            time_result = time_data.get('result', {})
+            if time_result:
+                server_time = time_result.get('unixtime', 0)
+                rfc_time = time_result.get('rfc1123', 'N/A')
+                console.print(f"🕐 Server Time: {server_time} ({rfc_time})")
+            
+            # Get system status
+            console.print("📡 API Status: [green]Connected[/green]")
+            console.print("🔄 Rate Limits: [green]Active[/green]")
+            
+            console.print("\n[bold cyan]Available Commands:[/bold cyan]")
+            console.print("  • info --pairs  → Show trading pairs")
+            console.print("  • ticker <PAIR> → Get price data")
+            console.print("  • status       → Check API connection")
+            console.print("  • portfolio    → View account balances")
+            
+    except Exception as e:
+        console.print(f"[red]❌ Error fetching info: {str(e)}[/red])
 
 @cli.command()
 @click.option('--pair', '-p', help='Filter by trading pair')

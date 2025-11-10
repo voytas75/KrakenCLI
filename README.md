@@ -400,6 +400,67 @@ The application is designed to be easily extensible:
 - Include logging for all operations
 - Write clear documentation
 
+## Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. Ticker Command Showing Incorrect 24h Change
+**Problem**: Ticker shows impossible percentage values (e.g., 3622%)
+
+**Solution**: This issue has been fixed in the latest version. The ticker now properly calculates percentage change using:
+```
+24h Change = ((Current Price - VWAP 24h) / VWAP 24h) * 100
+```
+
+**Fixed in**: v1.0.1 - Proper percentage calculation and color coding added
+
+#### 2. Status Command Errors
+**Error**: `'unixtime' KeyError`
+**Solution**: Fixed API response parsing for 2025 Kraken API format
+
+**Error**: `'str' object has no attribute 'get'`
+**Solution**: Fixed balance data handling - balances are returned as strings, not dictionaries
+
+#### 3. Ticker Command Arguments
+**Error**: `Got unexpected extra arguments (BTC EUR)`
+**Solution**: Updated ticker command to accept both formats:
+```bash
+python kraken_cli.py ticker BTC EUR     # NEW: Base Quote format
+python kraken_cli.py ticker --pair XBTUSD  # Original: Kraken format
+```
+
+#### 4. API Connection Issues
+- Verify your API credentials in `.env` file
+- Ensure API key has necessary permissions
+- Check internet connection
+- Try running: `python kraken_cli.py status`
+
+#### 5. Portfolio Balance Warnings
+**Warning**: "Could not find USD value for staked/future assets"
+**Explanation**: Some assets (ADA.S, DOT.S, ETH.F, XXDG) are special staked or future assets that don't have direct USD market data. This is normal and doesn't affect the balance display.
+
+### Testing Commands
+Use these commands to verify everything is working:
+
+```bash
+# Test API connection
+python kraken_cli.py status
+
+# Test ticker with multiple formats
+python kraken_cli.py ticker BTC USD
+python kraken_cli.py ticker --pair XBTUSD
+
+# View portfolio
+python kraken_cli.py portfolio
+
+# Check available trading pairs
+python kraken_cli.py info --pairs
+
+# Get help
+python kraken_cli.py --help
+python kraken_cli.py ticker --help
+```
+
 ## License
 
 This software is provided for educational purposes. Use at your own risk. The authors are not responsible for any financial losses incurred through the use of this software.
