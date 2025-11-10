@@ -35,6 +35,27 @@ config = Config()
 # Setup logging
 setup_logging()
 
+def _convert_to_kraken_asset(currency_code: str) -> str:
+    """Convert common currency codes to Kraken format"""
+    # Common currency mappings
+    conversions = {
+        'BTC': 'XBT',  # Bitcoin uses XBT in Kraken
+        'XBT': 'XBT',  # Already in Kraken format
+        'ETH': 'XETH',  # Ethereum uses XETH in Kraken  
+        'EUR': 'ZEUR',  # Euro
+        'USD': 'ZUSD',  # US Dollar
+        'GBP': 'ZGBP',  # British Pound
+        'JPY': 'ZJPY',  # Japanese Yen
+        'CAD': 'ZCAD',  # Canadian Dollar
+        'CHF': 'ZCHF',  # Swiss Franc
+        'ADA': 'ADA',   # Cardano (already in standard format)
+        'DOT': 'DOT',   # Polkadot (already in standard format)
+        'LINK': 'LINK', # Chainlink (already in standard format)
+        'SC': 'SC',     # Siacoin (already in standard format)
+    }
+    
+    return conversions.get(currency_code.upper(), currency_code.upper())
+
 @click.group()
 @click.pass_context
 def cli(ctx):
@@ -103,30 +124,58 @@ def status(ctx):
         console.print("[yellow]Please check your API credentials and internet connection[/yellow]")
 
 @cli.command()
-@click.option('--pair', '-p', default='XBTUSD', help='Trading pair (e.g., XBTUSD, ETHUSD)')
+@click.argument('base', required=False)
+@click.argument('quote', required=False)
+@click.option('--pair', '-p', help='Trading pair in Kraken format (e.g., XBTUSD, ETHUSD)')
 @click.pass_context
-def ticker(ctx, pair):
-    """Show ticker information for a trading pair"""
+def ticker(ctx, base, quote, pair):
+    """Show ticker information for a trading pair
+    
+    Usage:
+        kraken_cli.py ticker BTC EUR    # Bitcoin in Euro
+        kraken_cli.py ticker XBT USD    # Bitcoin in USD  
+        kraken_cli.py ticker --pair XBTUSD  # Direct Kraken pair format
+    """
     api_client = ctx.obj['api_client']
     
+    # Determine the trading pair
+    if pair:
+        trading_pair = pair.upper()
+    elif base and quote:
+        # Convert common currency codes to Kraken format
+        base_code = _convert_to_kraken_asset(base.upper())
+        quote_code = _convert_to_kraken_asset(quote.upper())
+        trading_pair = f"{base_code}{quote_code}"
+    else:
+        # Default to Bitcoin/USD
+        trading_pair = "XBTUSD"
+    
     try:
-        console.print(f"[bold blue]📊 Fetching ticker data for {pair}...[/bold blue]")
+        console.print(f"[bold blue]📊 Fetching ticker data for {trading_pair}...[/bold blue]")
         
-        ticker_data = api_client.get_ticker(pair)
+        ticker_data = api_client.get_ticker(trading_pair)
         
-        if ticker_data:
+        # Get ticker data from result field (2025 API format)
+        result_data = ticker_data.get('result', {})
+        pair_data = result_data.get(trading_pair, {})
+        
+        if pair_data:
             panel = Panel(
-                f"[bold cyan]{pair}[/bold cyan]\n"
-                f"Last Price: [green]{ticker_data.get('c', [0, ''])[0]}[/green]\n"
-                f"24h Change: [yellow]{ticker_data.get('p', ['', ''])[0]}%[/yellow]\n"
-                f"24h High: [green]{ticker_data.get('h', ['', ''])[0]}[/green]\n"
-                f"24h Low: [red]{ticker_data.get('l', ['', ''])[0]}[/red]\n"
-                f"Volume: [blue]{ticker_data.get('v', ['', ''])[0]}[/blue]",
-                title="Ticker Information"
+                f"[bold cyan]{trading_pair}[/bold cyan]\n"
+                f"Last Price: [green]{pair_data.get('c', ['0', ''])[0]}[/green]\n"
+                f"24h Change: [yellow]{pair_data.get('p', ['0', ''])[0]}%[/yellow]\n"
+                f"24h High: [green]{pair_data.get('h', ['0', ''])[0]}[/green]\n"
+                f"24h Low: [red]{pair_data.get('l', ['0', ''])[0]}[/red]\n"
+                f"Volume 24h: [blue]{pair_data.get('v', ['0', ''])[0]}[/blue]\n"
+                f"Bid: [green]{pair_data.get('b', ['0', ''])[0]}[/green]\n"
+                f"Ask: [red]{pair_data.get('a', ['0', ''])[0]}[/red]",
+                title="Market Data",
+                border_style="blue"
             )
             console.print(panel)
         else:
-            console.print(f"[red]No ticker data found for {pair}[/red]")
+            console.print(f"[red]❌ No ticker data found for {trading_pair}[/red]")
+            console.print("[yellow]💡 Try a different pair or check available trading pairs[/yellow]")
             
     except Exception as e:
         console.print(f"[red]❌ Error fetching ticker: {str(e)}[/red]")
@@ -139,8 +188,9 @@ def ticker(ctx, pair):
 @click.option('--volume', '-v', required=True, type=float, help='Order volume')
 @click.option('--price', help='Limit price (required for limit orders)')
 @click.option('--price2', help='Secondary price (for stop-loss-profit orders)')
+@click.option('--validate', is_flag=True, help='Validate order only, do not place')
 @click.pass_context
-def order(ctx, pair, side, order_type, volume, price, price2):
+def order(ctx, pair, side, order_type, volume, price, price2, validate):
     """Place a new order"""
     trader = ctx.obj['trader']
     
