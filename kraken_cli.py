@@ -61,29 +61,47 @@ def _convert_to_kraken_asset(currency_code: str) -> str:
 def cli(ctx):
     """Kraken Pro Trading CLI - Professional cryptocurrency trading interface"""
     ctx.ensure_object(dict)
-    # Don't check credentials here - let individual commands handle it
+    
+    # Initialize API client if credentials are available
+    if config.has_credentials():
+        try:
+            api_client = KrakenAPIClient(
+                api_key=config.api_key,
+                api_secret=config.api_secret,
+                sandbox=config.sandbox
+            )
+            ctx.obj['api_client'] = api_client
+        except Exception as e:
+            # If API client creation fails, store None - commands will handle missing client
+            ctx.obj['api_client'] = None
+    else:
+        # No credentials available
+        ctx.obj['api_client'] = None
 
 @cli.command()
 @click.pass_context
 def status(ctx):
     """Show account status and connectivity"""
-    # Check if API credentials are configured
-    if not config.has_credentials():
-        console.print("[red]⚠️  API credentials not configured![/red]")
-        console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
-        console.print("[yellow]See README.md for setup instructions[/yellow]")
-        return
+    # Get API client from context, or create if not available
+    api_client = ctx.obj.get('api_client')
     
-    # Initialize API client
-    try:
-        api_client = KrakenAPIClient(
-            api_key=config.api_key,
-            api_secret=config.api_secret,
-            sandbox=config.sandbox
-        )
-    except Exception as e:
-        console.print(f"[red]❌ Failed to initialize API client: {e}[/red]")
-        return
+    if api_client is None:
+        # Check if API credentials are configured and create client
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+        
+        try:
+            api_client = KrakenAPIClient(
+                api_key=config.api_key,
+                api_secret=config.api_secret,
+                sandbox=config.sandbox
+            )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to initialize API client: {e}[/red]")
+            return
     
     try:
         console.print("[bold blue]🔌 Checking Kraken API connection...[/bold blue]")
@@ -137,7 +155,26 @@ def ticker(ctx, base, quote, pair):
         kraken_cli.py ticker XBT USD    # Bitcoin in USD  
         kraken_cli.py ticker --pair XBTUSD  # Direct Kraken pair format
     """
-    api_client = ctx.obj['api_client']
+    # Get API client from context, or create if not available
+    api_client = ctx.obj.get('api_client')
+    
+    if api_client is None:
+        # Check if API credentials are configured and create client
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+        
+        try:
+            api_client = KrakenAPIClient(
+                api_key=config.api_key,
+                api_secret=config.api_secret,
+                sandbox=config.sandbox
+            )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to initialize API client: {e}[/red]")
+            return
     
     # Determine the trading pair
     if pair:
