@@ -57,32 +57,33 @@ def _convert_to_kraken_asset(currency_code: str) -> str:
     return conversions.get(currency_code.upper(), currency_code.upper())
 
 @click.group()
-@click.pass_context
+@click.pass_context  
 def cli(ctx):
     """Kraken Pro Trading CLI - Professional cryptocurrency trading interface"""
     ctx.ensure_object(dict)
-    
-    # Check if API credentials are configured
-    if not config.has_credentials():
-        console.print("[red]⚠️  API credentials not configured![/red]")
-        console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
-        console.print("[yellow]See README.md for setup instructions[/yellow]")
-        ctx.exit(1)
-    
-    # Initialize API client
-    ctx.obj['api_client'] = KrakenAPIClient(
-        api_key=config.api_key,
-        api_secret=config.api_secret,
-        sandbox=config.sandbox
-    )
-    ctx.obj['trader'] = Trader(ctx.obj['api_client'])
-    ctx.obj['portfolio'] = PortfolioManager(ctx.obj['api_client'])
+    # Don't check credentials here - let individual commands handle it
 
 @cli.command()
 @click.pass_context
 def status(ctx):
     """Show account status and connectivity"""
-    api_client = ctx.obj['api_client']
+    # Check if API credentials are configured
+    if not config.has_credentials():
+        console.print("[red]⚠️  API credentials not configured![/red]")
+        console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+        console.print("[yellow]See README.md for setup instructions[/yellow]")
+        return
+    
+    # Initialize API client
+    try:
+        api_client = KrakenAPIClient(
+            api_key=config.api_key,
+            api_secret=config.api_secret,
+            sandbox=config.sandbox
+        )
+    except Exception as e:
+        console.print(f"[red]❌ Failed to initialize API client: {e}[/red]")
+        return
     
     try:
         console.print("[bold blue]🔌 Checking Kraken API connection...[/bold blue]")
@@ -422,7 +423,7 @@ def info(ctx, pairs):
             console.print("  • portfolio    → View account balances")
             
     except Exception as e:
-        console.print(f"[red]❌ Error fetching info: {str(e)}[/red])
+        console.print(f"[red]❌ Error fetching info: {str(e)}[/red]")
 
 @cli.command()
 @click.option('--pair', '-p', help='Filter by trading pair')
