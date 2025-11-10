@@ -394,8 +394,9 @@ def order(ctx, pair, side, order_type, volume, price, price2, validate):
 @cli.command()
 @click.option('--status', '-s', help='Filter by order status (open, closed, any)')
 @click.option('--trades', is_flag=True, help='Show trade history instead of orders')
+@click.option('--verbose', '-v', is_flag=True, help='Show detailed debug information')
 @click.pass_context
-def orders(ctx, status, trades):
+def orders(ctx, status, trades, verbose):
     """Show current orders or trade history"""
     # Get portfolio from context, or create if not available
     portfolio = ctx.obj.get('portfolio')
@@ -465,14 +466,50 @@ def orders(ctx, status, trades):
                 table.add_column("Price", style="red")
                 
                 for order_id, order in orders_data.items():
+                    # Debug: Print the order structure to understand the format (only in verbose mode)
+                    if verbose and order_id == list(orders_data.keys())[0]:  # Print structure for first order only
+                        console.print(f"[dim]🔍 Debug: Order structure for {order_id}: {list(order.keys())}[/dim]")
+                        console.print(f"[dim]🔍 Debug: Full first order: {order}[/dim]")
+                    
+                    # Try multiple possible data structures for robustness
+                    descr = order.get('descr', {})
+                    
+                    # Extract time - try multiple possible field names
+                    time_val = order.get('opentm') or order.get('opentime') or order.get('time') or 'N/A'
+                    
+                    # Extract pair - try multiple possible paths
+                    pair_val = (descr.get('pair') or 
+                               order.get('pair') or 
+                               order.get('descr', {}).get('pair') or 'N/A')
+                    
+                    # Extract order side/type - try multiple possible paths  
+                    side_val = (descr.get('type') or 
+                               order.get('type') or 
+                               order.get('side') or 'N/A')
+                    
+                    # Extract order type - try multiple possible paths
+                    type_val = (descr.get('ordertype') or 
+                               order.get('ordertype') or 
+                               order.get('type') or 'N/A')
+                    
+                    # Extract volume - try multiple possible paths
+                    vol_val = (order.get('vol') or 
+                              order.get('volume') or 
+                              order.get('amount') or 'N/A')
+                    
+                    # Extract price - try multiple possible paths
+                    price_val = (descr.get('price') or 
+                               order.get('price') or 
+                               descr.get('price2') or 'N/A')
+                    
                     # Convert all values to strings to avoid Rich rendering issues
                     table.add_row(
-                        str(order.get('opentm', 'N/A')),
-                        str(order.get('descr', {}).get('pair', 'N/A')),
-                        str(order.get('descr', {}).get('type', 'N/A')),
-                        str(order.get('descr', {}).get('ordertype', 'N/A')),
-                        str(order.get('vol', 'N/A')),
-                        str(order.get('descr', {}).get('price', 'N/A'))
+                        str(time_val),
+                        str(pair_val),
+                        str(side_val),
+                        str(type_val),
+                        str(vol_val),
+                        str(price_val)
                     )
                 
                 console.print(table)
