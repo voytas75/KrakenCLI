@@ -461,6 +461,52 @@ python kraken_cli.py --help
 python kraken_cli.py ticker --help
 ```
 
+## Test Suite
+
+This project includes a comprehensive test suite to validate all CLI commands and ensure proper error handling.
+
+### Running Tests
+
+**Run the complete test suite:**
+```bash
+python tests/comprehensive_test.py
+```
+
+**Or use the convenience scripts:**
+```bash
+# Linux/macOS
+./run_tests.sh
+
+# Windows
+run_tests.bat
+```
+
+### Test Categories
+
+**Safe Commands** (work without credentials):
+- Help commands (`--help`)
+- Info commands
+- Ticker help
+
+**Credential Commands** (show graceful errors without credentials):
+- Portfolio (`portfolio`)
+- Status (`status`)
+- Orders (`orders`, `orders --trades`)
+- Ticker with real data
+- Order placement (`order`)
+- Order cancellation (`cancel`)
+
+### Test Results
+
+The test suite validates:
+- ✅ All commands work without crashing
+- ✅ Proper context object management
+- ✅ Graceful error handling for missing credentials
+- ✅ Rich library rendering compatibility
+- ✅ No KeyError exceptions
+
+For detailed information about each test file, see [tests/README.md](tests/README.md).
+
 ## License
 
 This software is provided for educational purposes. Use at your own risk. The authors are not responsible for any financial losses incurred through the use of this software.
