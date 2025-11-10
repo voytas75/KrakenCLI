@@ -14,9 +14,11 @@ def run_command(command):
             shell=True, 
             capture_output=True, 
             text=True, 
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace'  # Replace undecodable characters instead of failing
         )
-        return result.returncode, result.stdout, result.stderr
+        return result.returncode, result.stdout or "", result.stderr or ""
     except subprocess.TimeoutExpired:
         return -1, "", "Command timed out"
     except Exception as e:
@@ -58,7 +60,7 @@ def test_all_commands():
         else:
             print(f"❌ {desc}: FAILED")
             if stderr:
-                print(f"   Error: {stderr.strip()}")
+                print(f"   Error: {str(stderr).strip()}")
             all_passed = False
     
     print("\n🔍 Testing CREDENTIAL commands (should show graceful error):")
@@ -66,14 +68,14 @@ def test_all_commands():
     for cmd, desc in credential_commands:
         returncode, stdout, stderr = run_command(cmd)
         
-        if returncode == 0 and "API credentials not configured" in stdout:
+        if returncode == 0 and stdout and "API credentials not configured" in stdout:
             print(f"✅ {desc}: PASSED (graceful error)")
         elif returncode == 0:
             print(f"⚠️  {desc}: Unexpected success (may have credentials)")
         else:
             print(f"❌ {desc}: FAILED")
             if stderr:
-                print(f"   Error: {stderr.strip()}")
+                print(f"   Error: {str(stderr).strip()}")
             all_passed = False
     
     print("\n" + "=" * 50)

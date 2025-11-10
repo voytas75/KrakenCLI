@@ -431,13 +431,14 @@ def orders(ctx, status, trades):
                 table.add_column("Cost", style="red")
                 
                 for trade in trades_data:
+                    # Convert all values to strings to avoid Rich rendering issues
                     table.add_row(
-                        trade.get('time', 'N/A'),
-                        trade.get('pair', 'N/A'),
-                        trade.get('type', 'N/A'),
-                        trade.get('price', 'N/A'),
-                        trade.get('vol', 'N/A'),
-                        trade.get('cost', 'N/A')
+                        str(trade.get('time', 'N/A')),
+                        str(trade.get('pair', 'N/A')),
+                        str(trade.get('type', 'N/A')),
+                        str(trade.get('price', 'N/A')),
+                        str(trade.get('vol', 'N/A')),
+                        str(trade.get('cost', 'N/A'))
                     )
                 
                 console.print(table)
@@ -457,13 +458,14 @@ def orders(ctx, status, trades):
                 table.add_column("Price", style="red")
                 
                 for order_id, order in orders_data.items():
+                    # Convert all values to strings to avoid Rich rendering issues
                     table.add_row(
-                        order.get('opentm', 'N/A'),
-                        order.get('descr', {}).get('pair', 'N/A'),
-                        order.get('descr', {}).get('type', 'N/A'),
-                        order.get('descr', {}).get('ordertype', 'N/A'),
-                        order.get('vol', 'N/A'),
-                        order.get('descr', {}).get('price', 'N/A')
+                        str(order.get('opentm', 'N/A')),
+                        str(order.get('descr', {}).get('pair', 'N/A')),
+                        str(order.get('descr', {}).get('type', 'N/A')),
+                        str(order.get('descr', {}).get('ordertype', 'N/A')),
+                        str(order.get('vol', 'N/A')),
+                        str(order.get('descr', {}).get('price', 'N/A'))
                     )
                 
                 console.print(table)
