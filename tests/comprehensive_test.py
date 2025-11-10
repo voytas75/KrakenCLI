@@ -44,6 +44,8 @@ def test_all_commands():
         ("python kraken_cli.py orders", "Orders"),
         ("python kraken_cli.py orders --trades", "Trade history"),
         ("python kraken_cli.py ticker xbt usd", "Ticker XBT/USD"),
+        ("python kraken_cli.py ticker -p XBTUSD", "Ticker direct XBTUSD"),
+        ("python kraken_cli.py ticker -p ETHUSD", "Ticker direct ETHUSD"),
         ("python kraken_cli.py order --help", "Order help"),
         ("python kraken_cli.py cancel --help", "Cancel help"),
     ]

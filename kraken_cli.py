@@ -167,7 +167,7 @@ def status(ctx):
 @cli.command()
 @click.argument('base', required=False)
 @click.argument('quote', required=False)
-@click.option('--pair', '-p', help='Trading pair in Kraken format (e.g., XBTUSD, ETHUSD)')
+@click.option('--pair', '-p', help='Trading pair (e.g., XBTUSD, ETHUSD, ADAUSD)')
 @click.pass_context
 def ticker(ctx, base, quote, pair):
     """Show ticker information for a trading pair
@@ -176,6 +176,7 @@ def ticker(ctx, base, quote, pair):
         kraken_cli.py ticker BTC EUR    # Bitcoin in Euro
         kraken_cli.py ticker XBT USD    # Bitcoin in USD  
         kraken_cli.py ticker --pair XBTUSD  # Direct Kraken pair format
+        kraken_cli.py ticker --pair ETHUSD  # ETH/USD pair
     """
     # Get API client from context, or create if not available
     api_client = ctx.obj.get('api_client')
@@ -230,7 +231,13 @@ def ticker(ctx, base, quote, pair):
             # Look for alternate formats
             # Common conversions: XBTUSD -> XXBTZUSD, ETHUSD -> XETHZUSD
             alt_formats = []
-            if 'XBT' in trading_pair and 'USD' in trading_pair:
+            
+            # Handle different pair formats
+            if trading_pair == 'XBTUSD':
+                alt_formats = ['XXBTZUSD', 'XXBTZUSD']
+            elif trading_pair == 'ETHUSD':
+                alt_formats = ['XETHZUSD', 'XETHZUSD']
+            elif 'XBT' in trading_pair and 'USD' in trading_pair:
                 alt_formats = [trading_pair.replace('XBT', 'XXBT').replace('USD', 'ZUSD'), 
                               trading_pair.replace('XBT', 'XXBTZ').replace('USD', 'ZUSD')]
             elif 'XETH' in trading_pair and 'USD' in trading_pair:
