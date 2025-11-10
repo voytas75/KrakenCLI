@@ -92,6 +92,19 @@ The application follows the current Kraken API specifications:
 
 4. **Set up Kraken API credentials**
    - Go to [Kraken API Settings](https://www.kraken.com/u/settings/api)
+
+## Recent Updates (November 2025)
+
+### ✅ **Fixed Issues**
+- **Balance Data Processing**: Resolved `'str' object has no attribute 'get'` error
+  - Kraken API returns balances as strings, not dictionaries
+  - Code now correctly handles string-to-float conversion
+  - Improved balance display and filtering
+
+- **API Response Parsing**: Enhanced 2025 API compliance
+  - Proper handling of `{"error": [], "result": {}}` response format
+  - Fixed server time and balance data extraction
+  - Updated HTTP methods (GET for public endpoints, POST for private)
    - Create a new API key with the following permissions:
      - **Query Funds** - to check balances
      - **Query Open Orders & Trades** - to view orders and trades

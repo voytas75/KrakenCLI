@@ -87,14 +87,13 @@ def status(ctx):
             table = Table(title="Account Balances")
             table.add_column("Asset", style="cyan")
             table.add_column("Balance", style="green")
-            table.add_column("Hold", style="yellow")
             
-            for asset, amounts in balance_data.items():
-                if float(amounts.get('balance', 0)) > 0:
+            for asset, balance_str in balance_data.items():
+                # Kraken returns balances as strings, not dictionaries
+                if float(balance_str) > 0:
                     table.add_row(
                         asset,
-                        format_currency(amounts['balance']),
-                        format_currency(amounts.get('hold', '0'))
+                        format_currency(balance_str)
                     )
             
             console.print(table)
