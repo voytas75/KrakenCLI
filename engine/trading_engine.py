@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -265,19 +265,67 @@ class TradingEngine:
             return None
 
         result = response.get("result", {})
-        data = result.get(pair)
-        if not data:
-            logger.warning("No OHLCV data returned for %s.", pair)
+        if not result:
+            logger.warning("No OHLCV result payload for %s.", pair)
+            return None
+
+        ohlc_data, resolved_key = self._resolve_ohlc_payload(pair, result)
+        if ohlc_data is None:
+            sample_keys = [key for key in result.keys() if key != "last"][:5]
+            logger.warning(
+                "No OHLCV data returned for %s. Available keys: %s",
+                pair,
+                sample_keys or "none",
+            )
             return None
 
         df = pd.DataFrame(
-            data,
+            ohlc_data,
             columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"],
         )
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
         for column in ["open", "high", "low", "close", "vwap", "volume"]:
             df[column] = df[column].astype(float)
+        logger.debug("Loaded OHLCV data for %s via key %s (%d rows).", pair, resolved_key, len(df))
         return df
+
+    def _resolve_ohlc_payload(
+        self,
+        requested_pair: str,
+        result: Dict[str, Any],
+    ) -> Tuple[Optional[Iterable[Any]], Optional[str]]:
+        """Locate the OHLC payload for the requested pair within the API result."""
+        sanitized = {key: value for key, value in result.items() if key != "last"}
+        if not sanitized:
+            return None, None
+
+        target_normalized = self._normalize_pair_key(requested_pair)
+        for key, payload in sanitized.items():
+            if not payload:
+                continue
+            if self._normalize_pair_key(key) == target_normalized:
+                return payload, key
+        return None, None
+
+    @staticmethod
+    def _normalize_pair_key(pair_key: str) -> str:
+        """Normalize Kraken pair identifiers (e.g., XETHZUSD -> ETHUSD)."""
+        key = pair_key.upper()
+        if len(key) < 6:
+            return key
+        base = key[:-3]
+        quote = key[-3:]
+        normalized_base = TradingEngine._normalize_asset_code(base)
+        normalized_quote = TradingEngine._normalize_asset_code(quote)
+        return f"{normalized_base}{normalized_quote}"
+
+    @staticmethod
+    def _normalize_asset_code(code: str) -> str:
+        """Strip Kraken-specific leading prefixes without harming native symbols."""
+        normalized = code.upper()
+        while normalized.startswith(("X", "Z")) and len(normalized) > 3:
+            normalized = normalized[1:]
+        return normalized
 
     def _should_stop(self) -> bool:
         if self._stop_event.is_set():
