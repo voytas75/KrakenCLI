@@ -223,7 +223,6 @@ KrakenCLI/
 ├── requirements.txt         # Python dependencies
 ├── setup.py                 # Optional bootstrap helper
 ├── AGENTS.md                # Codex project guidance
-├── kcliblueprint.md         # Architectural reference
 └── logs/                    # Rotating log outputs (generated at runtime)
 ```
 
@@ -239,7 +238,6 @@ KrakenCLI/
 
 - Kraken REST API reference: https://docs.kraken.com/rest/
 - Kraken support centre: https://support.kraken.com
-- For architecture notes, review `kcliblueprint.md`.
 - Internal project guidelines: `AGENTS.md`
 
 ## License & Disclaimer
