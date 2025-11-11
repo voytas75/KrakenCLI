@@ -1,561 +1,247 @@
 # Kraken Pro Trading CLI
 
-A professional-grade command-line interface for trading cryptocurrencies on the Kraken exchange. This application provides comprehensive trading capabilities, portfolio management, and real-time market data access.
+Professional-grade command-line tooling for the Kraken cryptocurrency exchange. The CLI covers connectivity checks, market data, portfolio insights, and order execution with rich terminal feedback and comprehensive logging.
 
-## ⚠️ IMPORTANT RISK WARNINGS
+## Safety Notice
 
-**READ BEFORE USE:**
+- 🚨 Trading digital assets involves substantial risk and can result in complete loss of capital.
+- 🚨 Past performance is not indicative of future results.
+- 🚨 Always validate strategies in sandbox mode before trading live funds.
+- 🚨 Keep API credentials confidential and rotate them regularly.
 
-- 🚨 **Trading cryptocurrencies involves substantial risk of loss**
-- 🚨 **Past performance does not guarantee future results**
-- 🚨 **Only trade with money you can afford to lose completely**
-- 🚨 **This tool is provided for educational and research purposes**
-- 🚨 **The authors are not responsible for any trading losses**
-- 🚨 **Always test strategies in sandbox mode first**
-- 🚨 **Do your own research and understand the risks**
+## Table of Contents
 
-**RECOMMENDED PRACTICES:**
-- Start with small amounts
-- Use proper risk management
-- Understand stop-loss orders
-- Never invest more than you can afford to lose
-- Keep your API keys secure
+- [Overview](#overview)
+- [Feature Highlights](#feature-highlights)
+- [Quick Start](#quick-start)
+- [Configuration & Environment](#configuration--environment)
+- [Command Reference](#command-reference)
+- [Logging & Monitoring](#logging--monitoring)
+- [Testing & Quality Assurance](#testing--quality-assurance)
+- [Troubleshooting](#troubleshooting)
+- [Project Structure](#project-structure)
+- [Development Guidelines](#development-guidelines)
+- [Resources & Support](#resources--support)
+- [License & Disclaimer](#license--disclaimer)
 
-## Features
+## Overview
 
-### Core Trading Features
-- ✅ Place market, limit, stop-loss, and take-profit orders
-- ✅ Cancel individual or all open orders
-- ✅ Real-time ticker information
-- ✅ Order book data
-- ✅ Trade history tracking
-- ✅ Account balance monitoring
+Kraken Pro Trading CLI is a Python 3.12+ application that interacts with the 2025 Kraken REST API (`https://api.kraken.com/0/`). It authenticates via HMAC-SHA512 signatures, respects exchange rate limits, and outputs results using the Rich library for readable terminal formatting. Configuration values are loaded securely from environment variables, `.env`, `config.json`, and built-in defaults (in that order).
 
-### Portfolio Management
-- ✅ Real-time balance tracking
-- ✅ Portfolio value calculation (USD)
-- ✅ Open positions monitoring
-- ✅ Performance metrics
-- ✅ Asset allocation analysis
+## Feature Highlights
 
-### Technical Features
-- ✅ Secure API authentication
-- ✅ Rate limiting compliance
-- ✅ Comprehensive error handling
-- ✅ Rich console output with colors
-- ✅ Comprehensive logging
-- ✅ Configuration management
+### Trading & Market Data
 
-## API Specifications (Updated 2025)
+- Status command validates API connectivity, credentials, and surfaces the active log level.
+- Ticker command normalises common asset symbols (BTC, ETH, USD, etc.) to Kraken pair codes and displays prices, spreads, and 24h performance.
+- Order command supports market, limit, stop-loss, and take-profit orders with confirmation workflows and dry-run validation by default.
+- Orders command renders open orders or trade history with human-readable timestamps.
+- Cancel command handles single-order or global cancellations with explicit user confirmation.
 
-The application follows the current Kraken API specifications:
+### Portfolio & Risk Management
 
-**Base URL**: `https://api.kraken.com`  
-**API Version**: `/0/`  
-**Authentication**: HMAC-SHA512 with SHA256  
-**Rate Limits**: 
-- Public endpoints: 1 request/second
-- Private endpoints: 15-20 requests/minute  
-**Response Format**: JSON with `{"error": [], "result": {}}` structure
+- Portfolio command aggregates balances, USD valuations, and open position snapshots.
+- Built-in sanity checks flag missing USD reference prices for staked or future assets without breaking execution.
+- Rate limiting helpers and consistent API response handling guard against throttling penalties.
 
-**Key API Endpoints Used**:
-- Public: `/0/public/Ticker`, `/0/public/Time`, `/0/public/Depth`
-- Private: `/0/private/Balance`, `/0/private/AddOrder`, `/0/private/CancelOrder`
+### Operational Tooling
 
-## Installation
+- `config-setup` wizard bootstraps `.env` files interactively.
+- Logging helper writes rotating files to `logs/` and mirrors output to stdout at the configured level.
+- Rich console panels and status icons provide clear user feedback across commands.
+
+## Quick Start
 
 ### Prerequisites
-- Python 3.12 or higher
-- pip package manager
 
-### Setup Steps
+- Python 3.12 or higher (enforced by `setup.py`)
+- `pip` package manager
+- Kraken API key and secret with required permissions
 
-1. **Clone or download the application**
+### Install & Configure
+
+1. Clone or download the repository and move into the project directory:
    ```bash
-   # If you have the files locally, navigate to the directory
-   cd kraken-cli
+   git clone https://github.com/your-org/KrakenCLI.git
+   cd KrakenCLI
    ```
-
-2. **Install dependencies**
+2. (Optional) Create and activate a virtual environment:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   ```
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-
-3. **Configure API credentials**
+4. Create a `.env` file either by copying the template or running the interactive wizard:
    ```bash
-   # Copy the template file
-   cp .env.template .env
-   
-   # Edit the .env file with your Kraken API credentials
-   nano .env
+   cp .env.template .env            # or
+   python kraken_cli.py config-setup
    ```
+5. Populate `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`, and other settings in `.env`. Never commit real credentials to version control.
 
-4. **Set up Kraken API credentials**
-   - Go to [Kraken API Settings](https://www.kraken.com/u/settings/api)
+### Verify Installation
 
-## Recent Updates (November 2025)
+Run the following smoke checks after configuration:
 
-### ✅ **Fixed Issues**
-- **Balance Data Processing**: Resolved `'str' object has no attribute 'get'` error
-  - Kraken API returns balances as strings, not dictionaries
-  - Code now correctly handles string-to-float conversion
-  - Improved balance display and filtering
-
-- **API Response Parsing**: Enhanced 2025 API compliance
-  - Proper handling of `{"error": [], "result": {}}` response format
-  - Fixed server time and balance data extraction
-  - Updated HTTP methods (GET for public endpoints, POST for private)
-   - Create a new API key with the following permissions:
-     - **Query Funds** - to check balances
-     - **Query Open Orders & Trades** - to view orders and trades
-     - **Create & Modify Orders** - to place and manage orders
-     - **Cancel Orders** - to cancel orders
-   - Copy your API Key and API Secret to the `.env` file
-   - For testing, enable "Use Kraken sandbox" in the `.env` file
-
-5. **Test the connection**
-   ```bash
-   python kraken_cli.py status
-   ```
-
-## Usage
-
-### Basic Commands
-
-#### Check Account Status
 ```bash
-python kraken_cli.py status
-```
-Shows account balance, server time, and connection status.
-
-#### View Ticker Information
-```bash
-python kraken_cli.py ticker --pair XBTUSD
-python kraken_cli.py ticker -p ETHUSD
-```
-Displays current price, 24h change, volume, and market data.
-
-#### Place Orders
-
-Orders run in **dry-run validation mode by default**. Add `--execute` to place a live order (you'll be prompted to confirm, or use `--yes` to bypass the prompt). Use `--validate` to explicitly force validation-only behaviour.
-
-**Market Order (Buy) – Dry Run**
-```bash
-python kraken_cli.py order --pair XBTUSD --side buy --order-type market --volume 0.001
+python kraken_cli.py --help            # CLI command list
+python kraken_cli.py status            # Connectivity check + current log level
+python kraken_cli.py ticker -p ETHUSD  # Market data sample
+python kraken_cli.py orders            # Orders overview (handles missing creds gracefully)
+python tests/comprehensive_test.py     # End-to-end CLI regression suite
 ```
 
-**Limit Order (Sell) – Live Execution**
-```bash
-python kraken_cli.py order --pair ETHUSD --side sell --order-type limit --volume 0.5 --price 2500 --execute
-```
+The status command prints the active logger level so you can confirm the `KRAKEN_LOG_LEVEL` setting without inspecting files.
 
-**Stop-Loss Order**
-```bash
-python kraken_cli.py order --pair XBTUSD --side sell --order-type stop-loss --volume 0.001 --price2 45000
-```
+### Optional Setup Script
 
-#### Manage Orders
+`python setup.py` performs version checks, installs requirements, seeds `.env`, and runs `kraken_cli.py --help`. Use it if you prefer an automated bootstrap.
 
-**View Open Orders**
-```bash
-python kraken_cli.py orders
-```
+## Configuration & Environment
 
-**View Trade History**
-```bash
-python kraken_cli.py orders --trades
-```
+### Configuration Sources
 
-**Cancel Specific Order**
-```bash
-python kraken_cli.py cancel --txid YOUR_ORDER_ID
-```
+Precedence from highest to lowest:
 
-**Cancel All Orders**
-```bash
-python kraken_cli.py cancel --cancel-all
-```
-
-#### Portfolio Management
-
-**View Portfolio Overview**
-```bash
-python kraken_cli.py portfolio
-```
-
-**Setup Configuration**
-```bash
-python kraken_cli.py config-setup
-```
-
-**View Application Info**
-```bash
-python kraken_cli.py info
-```
-
-### Command Options
-
-#### Order Command Options
-- `--pair, -p`: Trading pair (e.g., XBTUSD, ETHUSD, ADAUSD)
-- `--side, -s`: Order side (buy/sell)
-- `--order-type, -t`: Order type (market/limit/stop-loss/take-profit)
-- `--volume, -v`: Order volume
-- `--price`: Limit price (required for limit orders)
-- `--price2`: Secondary price (for stop-loss/take-profit orders)
-- `--execute`: Execute the order after confirmation (otherwise performs a dry-run)
-- `--validate`: Force validation-only mode (alias for default behaviour)
-- `--yes, -y`: Skip the execution confirmation prompt (use with caution)
-
-#### Ticker Command Options
-- `--pair, -p`: Trading pair (default: XBTUSD)
-
-#### Orders Command Options
-- `--status, -s`: Filter by order status
-- `--trades`: Show trade history instead of orders
-
-#### Cancel Command Options
-- `--cancel-all`: Cancel all open orders
-- `--txid`: Cancel specific order by ID
-
-#### Portfolio Command Options
-- `--pair, -p`: Filter by trading pair
-
-## Configuration
+1. Runtime environment variables (`export VAR=value`)
+2. `.env` file values (loaded via `python-dotenv`)
+3. `config.json` (for non-sensitive defaults such as rate limit or timeout)
+4. Application defaults embedded in `config.Config`
 
 ### Environment Variables
 
-Create a `.env` file in the application directory:
+| Variable            | Purpose                                            | Default |
+|---------------------|----------------------------------------------------|---------|
+| `KRAKEN_API_KEY`    | Kraken API key (private endpoints)                 | `None`  |
+| `KRAKEN_API_SECRET` | Kraken API secret (base64 string)                  | `None`  |
+| `KRAKEN_SANDBOX`    | Toggle sandbox/test environment (`true`/`false`)   | `false` |
+| `KRAKEN_RATE_LIMIT` | Requests per second throttle                       | `1`     |
+| `KRAKEN_TIMEOUT`    | HTTP request timeout in seconds                    | `30`    |
+| `KRAKEN_LOG_LEVEL`  | Root logger level (`INFO`, `DEBUG`, etc.)          | `INFO`  |
+
+Example `.env` snippet:
 
 ```env
-# Kraken API Configuration (2025 API Compliant)
-KRAKEN_API_KEY=your_actual_api_key_here
-KRAKEN_API_SECRET=your_actual_api_secret_here
-
-# Environment Setting
-# Note: Sandbox is now controlled via API key permissions
-# The base URL is always https://api.kraken.com
+KRAKEN_API_KEY=your_api_key_here
+KRAKEN_API_SECRET=your_api_secret_here
 KRAKEN_SANDBOX=false
-
-# Rate limiting (updated for 2025 API)
-# Public: 1 req/sec, Private: 15-20 req/min
 KRAKEN_RATE_LIMIT=1
-
-# Request timeout
 KRAKEN_TIMEOUT=30
-
-# Logging level
 KRAKEN_LOG_LEVEL=INFO
 ```
 
-### Configuration Precedence
+### API Permissions
 
-The CLI now honours the following order when resolving settings:
-1. **Runtime environment variables** (e.g. those exported in your shell)
-2. **`.env` file values** loaded via `python-dotenv`
-3. **`config.json` defaults** stored alongside the codebase
-4. **Built-in defaults** shipped with the application
+Create a Kraken API key with at least:
 
-`config.json` is optional and useful for non-sensitive defaults such as rate limits:
-
-```json
-{
-  "sandbox": false,
-  "rate_limit": 1,
-  "timeout": 30,
-  "log_level": "INFO"
-}
-```
-
-⚠️ Avoid storing real API secrets in `config.json`; prefer environment variables or `.env`.
-
-### API Setup for 2025
-
-**Important Changes for 2025:**
-- All API calls use `https://api.kraken.com` as base URL
-- Sandbox access is controlled by API key permissions, not separate URLs
-- Authentication uses updated HMAC-SHA512 with SHA256 method
-- Rate limits are strictly enforced (1 req/sec public, 15-20 req/min private)
-
-### API Permissions Required
-
-Your Kraken API key needs these permissions:
-- **Query Funds** - View account balances
-- **Query Open Orders & Trades** - View orders and trade history
-- **Create & Modify Orders** - Place new orders
-- **Cancel Orders** - Cancel existing orders
+- Query Funds
+- Query Open Orders & Trades
+- Create & Modify Orders
+- Cancel Orders
 
 ### Sandbox Mode
 
-For testing, set `KRAKEN_SANDBOX=true` in your `.env` file. This uses Kraken's test environment with fake money. Remember to:
-- Create a separate API key for sandbox testing
-- Switch to `KRAKEN_SANDBOX=false` for live trading
+Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and revert to `false` for live trading. The base URL remains `https://api.kraken.com`; sandbox behaviour is controlled by key entitlements.
 
-## Supported Trading Pairs
+## Command Reference
 
-Common trading pairs supported:
-- XBTUSD (Bitcoin/USD)
-- ETHUSD (Ethereum/USD)
-- ADAUSD (Cardano/USD)
-- DOTUSD (Polkadot/USD)
-- LINKUSD (Chainlink/USD)
-- And many more available on Kraken
+| Command | Description | Example |
+|---------|-------------|---------|
+| `status` | Check API connectivity, balances, and log level | `python kraken_cli.py status` |
+| `ticker` | Display market data for a trading pair (`--pair` or base/quote args) | `python kraken_cli.py ticker -p XBTUSD` |
+| `order` | Validate or execute an order (dry-run by default) | `python kraken_cli.py order --pair ETHUSD --side buy --order-type limit --volume 0.5 --price 2500` |
+| `orders` | View open orders or trade history (`--trades`) | `python kraken_cli.py orders --trades` |
+| `cancel` | Cancel a specific order (`--txid`) or all (`--cancel-all`) | `python kraken_cli.py cancel --txid OABC123` |
+| `portfolio` | Summarise balances, USD valuations, and open positions | `python kraken_cli.py portfolio` |
+| `config-setup` | Interactive `.env` generator | `python kraken_cli.py config-setup` |
+| `info` | Application overview, risk warnings, and current log level | `python kraken_cli.py info` |
 
-## Advanced Usage
+### Order Options at a Glance
 
-### Custom Order Types
+- `--pair / -p`: Kraken trading pair (e.g., `XBTUSD`, `ETHUSD`)
+- `--side / -s`: `buy` or `sell`
+- `--order-type / -t`: `market`, `limit`, `stop-loss`, `take-profit`
+- `--volume / -v`: Order volume (float)
+- `--price`: Required for `limit` orders
+- `--price2`: Secondary trigger price (stop-loss/take-profit)
+- `--execute`: Execute live order after confirmation (otherwise validation only)
+- `--validate`: Explicit dry-run (alias for default behaviour)
+- `--yes / -y`: Skip execution confirmation (experienced users only)
 
-**Take-Profit Order**
+## Logging & Monitoring
+
+- Logs are written to `logs/kraken_cli.log` with rotation (10 MB x 5 files).
+- Root logger honours `KRAKEN_LOG_LEVEL`; invalid values fall back to `INFO`.
+- Outgoing API calls and errors are logged without leaking sensitive data.
+- The current log level is displayed in CLI output (`status` command and application info panel) to confirm runtime configuration quickly.
+
+## Testing & Quality Assurance
+
+The project ships with CLI-focused regression tests (`tests/comprehensive_test.py`) and helper scripts.
+
+Recommended test sequence after changes:
+
 ```bash
-python kraken_cli.py order --pair XBTUSD --side sell --order-type take-profit --volume 0.001 --price 50000 --price2 48000
+python tests/comprehensive_test.py
+python kraken_cli.py --help
+python kraken_cli.py status
+python kraken_cli.py orders
+python kraken_cli.py ticker -p ETHUSD
 ```
 
-**Stop-Loss with Limit**
-```bash
-python kraken_cli.py order --pair ETHUSD --side sell --order-type stop-loss --volume 1.0 --price 2000 --price2 1900
-```
-
-### Monitoring Market Data
-
-**Real-time Order Book**
-```bash
-python kraken_cli.py ticker --pair XBTUSD
-```
-
-**Portfolio with Specific Asset**
-```bash
-python kraken_cli.py portfolio --pair ETHUSD
-```
-
-## Error Handling
-
-The application includes comprehensive error handling for:
-- Network connectivity issues
-- API rate limiting
-- Invalid API credentials
-- Insufficient account balance
-- Invalid order parameters
-- Market data unavailable
-
-## Security Best Practices
-
-1. **API Key Security**
-   - Never share your API keys
-   - Use environment variables
-   - Regularly rotate API keys
-   - Use minimal required permissions
-
-2. **Account Security**
-   - Enable two-factor authentication on Kraken
-   - Use strong passwords
-   - Monitor account activity regularly
-   - Set appropriate withdrawal limits
-
-3. **Trading Security**
-   - Start with small amounts
-   - Use stop-loss orders
-   - Diversify your portfolio
-   - Keep detailed trading records
+Ensure commands that hit authenticated endpoints handle missing credentials gracefully when running in non-production environments.
 
 ## Troubleshooting
 
-### Common Issues
+- **“API credentials not configured”**: Confirm `.env` exists, is readable, and contains populated key/secret values. Restart your shell session after exporting variables manually.
+- **Connection failures or timeouts**: Verify network access, confirm API rate limits are not exceeded, and check `KRAKEN_TIMEOUT`.
+- **Invalid trading pair**: Use recognised Kraken symbols (`XBTUSD`, `ETHUSD`, etc.). The CLI automatically maps common codes like `BTC` to `XBT`.
+- **Unexpected percentage changes**: VWAP-based calculations rely on Kraken’s 24h stats; large deviations usually indicate thin liquidity or newly listed assets.
+- **Portfolio warnings about staked assets**: Staked or future tokens (e.g., `ADA.S`) may not have direct USD pricing. The CLI flags them without interrupting execution.
+- **Logs look empty**: Confirm `KRAKEN_LOG_LEVEL` isn’t set higher than intended. Run `python kraken_cli.py status` to display the active level.
 
-**"API credentials not configured"**
-- Check that your `.env` file exists and contains valid API credentials
-- Ensure the file path is correct
+For deeper debugging, add `--verbose` (where available), rerun commands, and inspect `logs/kraken_cli.log`.
 
-**"Connection failed"**
-- Check your internet connection
-- Verify API credentials are correct
-- Ensure the API key has required permissions
-
-**"Invalid trading pair"**
-- Use valid Kraken trading pairs (e.g., XBTUSD, ETHUSD)
-- Check the pair format matches Kraken's requirements
-
-**"Insufficient balance"**
-- Check your account balance
-- Ensure you have enough funds for the order
-- Account for trading fees
-
-### Getting Help
-
-- Kraken API Documentation: https://docs.kraken.com/rest/
-- Kraken Support: https://support.kraken.com
-- Check the logs directory for detailed error information
-
-## Logging
-
-The application creates detailed logs in the `logs/` directory:
-- `kraken_cli.log` - Main application log
-- Logs include all API requests, responses, and errors
-- Log level can be configured in `.env`
-
-## File Structure
+## Project Structure
 
 ```
 KrakenCLI/
-├── kraken_cli.py           # Main CLI application
-├── config.py               # Configuration management helper
+├── kraken_cli.py            # Main Click command group
+├── config.py                # Configuration loader and precedence handler
 ├── api/
-│   └── kraken_client.py    # Kraken REST client
+│   └── kraken_client.py     # REST API integration and signing
 ├── portfolio/
-│   └── portfolio_manager.py  # Portfolio handling
+│   └── portfolio_manager.py # Portfolio aggregation logic
 ├── trading/
-│   └── trader.py           # Order placement routines
+│   └── trader.py            # Order validation and submission
 ├── utils/
-│   ├── helpers.py          # Formatting helpers
-│   └── logger.py           # Logging configuration
-├── tests/                  # CLI smoke and debug scripts
-│   ├── comprehensive_test.py
-│   ├── final_demo.py
-│   ├── final_test_summary.py
-│   ├── test_kraken_pairs.py
-│   ├── test_pair_resolution.py
-│   ├── test_ticker_debug.py
-│   └── test_ticker_fix.py
-├── test_orders_fix.py      # Standalone orders regression check
-├── run_tests.sh / run_tests.bat
-├── requirements.txt        # Python dependencies
-├── .env.template           # Environment template (copy to .env)
-├── AGENTS.md               # Codex project guide
-├── kcliblueprint.md        # Architectural blueprint
-├── README.md               # Project documentation
-└── logs/                   # Rotating log files (created automatically)
+│   ├── helpers.py           # Formatting utilities
+│   └── logger.py            # Logging bootstrap
+├── tests/                   # CLI regression scripts
+├── requirements.txt         # Python dependencies
+├── setup.py                 # Optional bootstrap helper
+├── AGENTS.md                # Codex project guidance
+├── kcliblueprint.md         # Architectural reference
+└── logs/                    # Rotating log outputs (generated at runtime)
 ```
 
-`.env` is created locally after copying from `.env.template` or running `python kraken_cli.py config-setup`.
+## Development Guidelines
 
-## Development
+- Follow PEP 8 and include type hints and docstrings for public functions.
+- Handle Kraken API errors gracefully; never expose secrets in logs or console output.
+- Respect rate limits (1 req/sec public, ~15 req/min private) and back off on HTTP errors.
+- Use Rich components consistently for user-facing output.
+- Before submitting changes, run the comprehensive test script and smoke-test core commands listed in [Testing & Quality Assurance](#testing--quality-assurance).
 
-### Adding New Features
+## Resources & Support
 
-The application is designed to be easily extensible:
-- Add new commands in `kraken_cli.py`
-- Extend API functionality in `api/kraken_client.py`
-- Add new trading features in `trading/trader.py`
-- Enhance portfolio features in `portfolio/portfolio_manager.py`
+- Kraken REST API reference: https://docs.kraken.com/rest/
+- Kraken support centre: https://support.kraken.com
+- For architecture notes, review `kcliblueprint.md`.
+- Internal project guidelines: `AGENTS.md`
 
-### Code Quality
+## License & Disclaimer
 
-- Follow PEP 8 style guidelines
-- Add comprehensive error handling
-- Include logging for all operations
-- Write clear documentation
-
-## Troubleshooting
-
-### Common Issues and Solutions
-
-#### 1. Ticker Command Showing Incorrect 24h Change
-**Problem**: Ticker shows impossible percentage values (e.g., 3622%)
-
-**Solution**: This issue has been fixed in the latest version. The ticker now properly calculates percentage change using:
-```
-24h Change = ((Current Price - VWAP 24h) / VWAP 24h) * 100
-```
-
-**Fixed in**: v1.0.1 - Proper percentage calculation and color coding added
-
-#### 2. Status Command Errors
-**Error**: `'unixtime' KeyError`
-**Solution**: Fixed API response parsing for 2025 Kraken API format
-
-**Error**: `'str' object has no attribute 'get'`
-**Solution**: Fixed balance data handling - balances are returned as strings, not dictionaries
-
-#### 3. Ticker Command Arguments
-**Error**: `Got unexpected extra arguments (BTC EUR)`
-**Solution**: Updated ticker command to accept both formats:
-```bash
-python kraken_cli.py ticker BTC EUR     # NEW: Base Quote format
-python kraken_cli.py ticker --pair XBTUSD  # Original: Kraken format
-```
-
-#### 4. API Connection Issues
-- Verify your API credentials in `.env` file
-- Ensure API key has necessary permissions
-- Check internet connection
-- Try running: `python kraken_cli.py status`
-
-#### 5. Portfolio Balance Warnings
-**Warning**: "Could not find USD value for staked/future assets"
-**Explanation**: Some assets (ADA.S, DOT.S, ETH.F, XXDG) are special staked or future assets that don't have direct USD market data. This is normal and doesn't affect the balance display.
-
-### Testing Commands
-Use these commands to verify everything is working:
-
-```bash
-# Test API connection
-python kraken_cli.py status
-
-# Test ticker with multiple formats
-python kraken_cli.py ticker BTC USD
-python kraken_cli.py ticker --pair XBTUSD
-
-# View portfolio
-python kraken_cli.py portfolio
-
-# Check available trading pairs
-python kraken_cli.py info --pairs
-
-# Get help
-python kraken_cli.py --help
-python kraken_cli.py ticker --help
-```
-
-## Test Suite
-
-This project includes a comprehensive test suite to validate all CLI commands and ensure proper error handling.
-
-### Running Tests
-
-**Run the complete test suite:**
-```bash
-python tests/comprehensive_test.py
-```
-
-**Or use the convenience scripts:**
-```bash
-# Linux/macOS
-./run_tests.sh
-
-# Windows
-run_tests.bat
-```
-
-### Test Categories
-
-**Safe Commands** (work without credentials):
-- Help commands (`--help`)
-- Info commands
-- Ticker help
-
-**Credential Commands** (show graceful errors without credentials):
-- Portfolio (`portfolio`)
-- Status (`status`)
-- Orders (`orders`, `orders --trades`)
-- Ticker with real data
-- Order placement (`order`)
-- Order cancellation (`cancel`)
-
-### Test Results
-
-The test suite validates:
-- ✅ All commands work without crashing
-- ✅ Proper context object management
-- ✅ Graceful error handling for missing credentials
-- ✅ Rich library rendering compatibility
-- ✅ No KeyError exceptions
-
-For detailed information about each test file, see [tests/README.md](tests/README.md).
-
-## License
-
-This software is provided for educational purposes. Use at your own risk. The authors are not responsible for any financial losses incurred through the use of this software.
-
-## Disclaimer
-
-This software is not affiliated with Kraken. It's an independent tool for interacting with the Kraken API. Always verify that you're using the official Kraken API and follow their terms of service.
-
-**TRADING RISK WARNING: Cryptocurrency trading involves substantial risk of loss. Past performance is not indicative of future results. Only trade with money you can afford to lose completely.**
+This project is provided for educational and research purposes. It is not affiliated with Kraken, and the authors accept no liability for financial losses. By using the CLI you acknowledge the risks associated with cryptocurrency trading and agree to trade only with funds you can afford to lose.
