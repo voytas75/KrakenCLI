@@ -2,6 +2,8 @@
 """
 Kraken Pro Trading CLI Application
 Professional cryptocurrency trading interface for Kraken exchange
+
+Updates: v0.9.0 - 2025-11-11 - Added automated trading engine commands and integrations.
 """
 
 import click
@@ -9,6 +11,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional, Sequence
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -25,6 +28,10 @@ from trading.trader import Trader
 from portfolio.portfolio_manager import PortfolioManager
 from utils.logger import setup_logging
 from utils.helpers import format_currency, format_percentage, format_asset_amount
+from engine import TradingEngine, TradingEngineStatus
+from strategies import StrategyManager
+from risk import RiskManager
+from indicators import TechnicalIndicators  # noqa: F401  # ensure optional deps resolved
 
 # Load environment variables
 load_dotenv()
@@ -34,6 +41,10 @@ config = Config()
 
 # Setup logging
 setup_logging(log_level=config.log_level)
+
+AUTO_CONTROL_DIR = Path("logs/auto_trading")
+RISK_STATE_FILE = AUTO_CONTROL_DIR / "risk_state.json"
+AUTO_STATUS_FILE = AUTO_CONTROL_DIR / "status.json"
 
 
 def _get_active_log_level() -> str:
@@ -68,6 +79,7 @@ def _convert_to_kraken_asset(currency_code: str) -> str:
 def cli(ctx):
     """Kraken Pro Trading CLI - Professional cryptocurrency trading interface"""
     ctx.ensure_object(dict)
+    ctx.obj['config'] = config
     
     # Initialize API client if credentials are available
     if config.has_credentials():
@@ -106,6 +118,36 @@ def cli(ctx):
     except Exception as e:
         # If trader creation fails, store None
         ctx.obj['trader'] = None
+
+
+def _create_strategy_manager(config_obj: Config) -> StrategyManager:
+    """Instantiate a strategy manager for the configured YAML path."""
+    return StrategyManager(config_obj.get_auto_trading_config_path())
+
+
+def _create_trading_engine(ctx, poll_interval: int) -> Optional[TradingEngine]:
+    """Create a TradingEngine instance when prerequisites are available."""
+    trader: Trader = ctx.obj.get('trader')
+    portfolio: PortfolioManager = ctx.obj.get('portfolio')
+    config_obj: Config = ctx.obj.get('config', config)
+
+    if trader is None or portfolio is None:
+        console.print("[red]❌ Automated trading requires authenticated trader access.[/red]")
+        return None
+
+    strategy_manager = _create_strategy_manager(config_obj)
+    risk_manager = RiskManager(RISK_STATE_FILE)
+
+    engine = TradingEngine(
+        trader=trader,
+        portfolio_manager=portfolio,
+        strategy_manager=strategy_manager,
+        risk_manager=risk_manager,
+        control_dir=AUTO_CONTROL_DIR,
+        poll_interval=poll_interval,
+        rate_limit=config_obj.get_rate_limit(),
+    )
+    return engine
 
 @cli.command()
 @click.pass_context
@@ -855,6 +897,119 @@ def portfolio(ctx, pair):
             
     except Exception as e:
         console.print(f"[red]❌ Error fetching portfolio: {str(e)}[/red]")
+
+@cli.command("auto-config")
+@click.option("--show/--no-show", default=False, help="Display the current auto trading YAML content.")
+@click.pass_context
+def auto_config(ctx, show: bool) -> None:
+    """Display the auto trading configuration file path and optional contents."""
+    config_obj: Config = ctx.obj.get('config', config)
+    path = config_obj.get_auto_trading_config_path()
+    console.print(f"ℹ️  Auto trading configuration file: [cyan]{path.resolve()}[/cyan]")
+
+    if show:
+        if not path.exists():
+            console.print("[red]❌ Configuration file not found.[/red]")
+            return
+        content = path.read_text(encoding="utf-8")
+        console.print(Panel(content, title="auto_trading.yaml"))
+
+
+@cli.command("auto-start")
+@click.option("--strategy", "-s", multiple=True, help="Strategy key(s) to run (default: all enabled).")
+@click.option("--pairs", "-p", help="Comma separated trading pairs override (e.g., ETHUSD,BTCUSD).")
+@click.option("--timeframe", "-t", help="Override timeframe for all strategies (e.g., 1h, 4h).")
+@click.option("--interval", "-i", type=int, default=300, help="Polling interval in seconds between cycles.")
+@click.option("--dry-run/--live", default=True, help="Execute in dry-run validation mode or live trading.")
+@click.option("--cycles", type=int, default=None, help="Limit the number of cycles (testing).")
+@click.pass_context
+def auto_start(
+    ctx,
+    strategy: Sequence[str],
+    pairs: Optional[str],
+    timeframe: Optional[str],
+    interval: int,
+    dry_run: bool,
+    cycles: Optional[int],
+) -> None:
+    """Start the automated trading engine."""
+    engine = _create_trading_engine(ctx, poll_interval=interval)
+    if engine is None:
+        return
+
+    strategy_keys = list(strategy) if strategy else None
+    pair_list = [item.strip() for item in pairs.split(",") if item.strip()] if pairs else None
+
+    console.print(
+        f"🚀 Starting auto trading engine | Dry-run: [cyan]{dry_run}[/cyan] | Interval: [cyan]{interval}s[/cyan]"
+    )
+
+    try:
+        engine.run_forever(
+            strategy_keys=strategy_keys,
+            dry_run=dry_run,
+            poll_interval=interval,
+            max_cycles=cycles,
+            pairs_override=pair_list,
+            timeframe_override=timeframe,
+        )
+    except KeyboardInterrupt:
+        console.print("\n⚠️  Interrupted by user, requesting shutdown...")
+        engine.request_stop()
+    except FileNotFoundError as exc:
+        console.print(f"[red]❌ Configuration error: {exc}[/red]")
+        return
+    except ValueError as exc:
+        console.print(f"[red]❌ Strategy configuration invalid: {exc}[/red]")
+        return
+    except Exception as exc:  # pragma: no cover - defensive catch
+        console.print(f"[red]❌ Engine encountered an error: {exc}[/red]")
+        return
+    finally:
+        status = engine.status()
+        console.print(f"✅ Engine stopped. Processed signals (last cycle): [green]{status.processed_signals}[/green]")
+
+
+@cli.command("auto-stop")
+def auto_stop() -> None:
+    """Signal a running auto trading engine to stop."""
+    AUTO_CONTROL_DIR.mkdir(parents=True, exist_ok=True)
+    stop_file = AUTO_CONTROL_DIR / "stop.flag"
+    stop_file.write_text("stop", encoding="utf-8")
+    console.print("🛑 Stop request written. Engine will halt after the next cycle.")
+
+
+@cli.command("auto-status")
+def auto_status() -> None:
+    """Display the most recent auto trading engine status."""
+    if not AUTO_STATUS_FILE.exists():
+        console.print("[yellow]ℹ️  No status file available. Start the engine first.[/yellow]")
+        return
+
+    try:
+        payload = json.loads(AUTO_STATUS_FILE.read_text(encoding="utf-8"))
+        status = TradingEngineStatus.from_dict(payload)
+    except (json.JSONDecodeError, OSError) as exc:
+        console.print(f"[red]❌ Failed to read status: {exc}[/red]")
+        return
+
+    table = Table(title="Auto Trading Status")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Running", "✅" if status.running else "❌")
+    table.add_row("Dry Run", "✅" if status.dry_run else "❌")
+    table.add_row(
+        "Last Cycle",
+        status.last_cycle_at.isoformat() if status.last_cycle_at else "N/A",
+    )
+    table.add_row("Processed Signals", str(status.processed_signals))
+    table.add_row("Active Strategies", ", ".join(status.active_strategies) or "N/A")
+    table.add_row("Active Pairs", ", ".join(status.active_pairs) or "N/A")
+    table.add_row("Last Error", status.last_error or "None")
+
+    console.print(table)
+
 
 @cli.command()
 def config_setup():

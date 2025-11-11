@@ -55,6 +55,7 @@ examples/
 AGENTS.md
 AGENTS*.md
 kcliblueprint.md
+kraken_auto_trading_blueprint.md
 .coverage
 .mypy_cache/
 .nox/

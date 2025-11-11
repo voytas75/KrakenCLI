@@ -1,0 +1,15 @@
+strategies:
+  rsi:
+    name: "RSI Mean Reversion"
+    enabled: true
+    timeframe: "1h"
+    parameters:
+      rsi_period: 14
+      oversold: 30
+      overbought: 70
+      cooldown_bars: 3
+      signal_threshold: 0.55
+    risk:
+      position_size: 0.02
+      stop_loss: 0.03
+      take_profit: 0.06

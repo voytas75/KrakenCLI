@@ -51,6 +51,13 @@ Kraken Pro Trading CLI is a Python 3.12+ application that interacts with the 202
 - Logging helper writes rotating files to `logs/` and mirrors output to stdout at the configured level.
 - Rich console panels and status icons provide clear user feedback across commands.
 
+### Automated Trading (In Progress)
+
+- Strategy engine with configurable RSI/MACD/MA strategies defined in YAML.
+- Risk manager enforcing position sizing, daily loss caps, and stop management.
+- Background trading service controllable via new `auto-*` CLI commands.
+- Backtesting toolkit for historical validation and performance scoring.
+
 ## Quick Start
 
 ### Prerequisites
@@ -75,6 +82,7 @@ Kraken Pro Trading CLI is a Python 3.12+ application that interacts with the 202
    ```bash
    pip install -r requirements.txt
    ```
+   > **TA-Lib prerequisites**: install system libraries first (`sudo apt-get install ta-lib` on Debian/Ubuntu or `brew install ta-lib` on macOS).
 4. Create a `.env` file either by copying the template or running the interactive wizard:
    ```bash
    cp .env.template .env            # or
@@ -121,6 +129,15 @@ Precedence from highest to lowest:
 | `KRAKEN_RATE_LIMIT` | Requests per second throttle                       | `1`     |
 | `KRAKEN_TIMEOUT`    | HTTP request timeout in seconds                    | `30`    |
 | `KRAKEN_LOG_LEVEL`  | Root logger level (`INFO`, `DEBUG`, etc.)          | `INFO`  |
+| `AUTO_TRADING_ENABLED` | Enable the automated trading engine (`true`/`false`) | `false` |
+| `AUTO_TRADING_CONFIG_PATH` | Path to YAML file describing strategies and risk limits | `./configs/auto_trading.yaml` |
+| `ALERT_WEBHOOK_URL` | Optional webhook endpoint for alerts               | `None`  |
+| `ALERT_EMAIL_SENDER` | SMTP sender address for email alerts              | `None`  |
+| `ALERT_EMAIL_RECIPIENTS` | Comma-separated list of alert recipients     | `None`  |
+| `ALERT_EMAIL_SMTP_SERVER` | SMTP server hostname                         | `None`  |
+| `ALERT_EMAIL_SMTP_PORT` | SMTP server port (defaults to TLS 587)         | `587`   |
+| `ALERT_EMAIL_SMTP_USERNAME` | SMTP username                             | `None`  |
+| `ALERT_EMAIL_SMTP_PASSWORD` | SMTP password (store securely)            | `None`  |
 
 Example `.env` snippet:
 
@@ -131,6 +148,15 @@ KRAKEN_SANDBOX=false
 KRAKEN_RATE_LIMIT=1
 KRAKEN_TIMEOUT=30
 KRAKEN_LOG_LEVEL=INFO
+AUTO_TRADING_ENABLED=false
+AUTO_TRADING_CONFIG_PATH=./configs/auto_trading.yaml
+ALERT_WEBHOOK_URL=
+ALERT_EMAIL_SENDER=
+ALERT_EMAIL_RECIPIENTS=
+ALERT_EMAIL_SMTP_SERVER=
+ALERT_EMAIL_SMTP_PORT=587
+ALERT_EMAIL_SMTP_USERNAME=
+ALERT_EMAIL_SMTP_PASSWORD=
 ```
 
 ### API Permissions
@@ -158,6 +184,10 @@ Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and 
 | `portfolio` | Summarise balances, USD valuations, and open positions | `python kraken_cli.py portfolio` |
 | `config-setup` | Interactive `.env` generator | `python kraken_cli.py config-setup` |
 | `info` | Application overview, risk warnings, and current log level | `python kraken_cli.py info` |
+| `auto-config` | Show auto trading config path and optional contents | `python kraken_cli.py auto-config --show` |
+| `auto-start` | Launch automated trading engine (interactive loop) | `python kraken_cli.py auto-start --dry-run --pairs ETHUSD` |
+| `auto-stop` | Signal a running auto engine to stop next cycle | `python kraken_cli.py auto-stop` |
+| `auto-status` | Inspect latest auto engine status snapshot | `python kraken_cli.py auto-status` |
 
 ### Order Options at a Glance
 

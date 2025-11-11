@@ -1,5 +1,7 @@
 """
 Configuration management for Kraken CLI.
+
+Updates: v0.9.0 - 2025-11-11 - Added automated trading and alert configuration options.
 """
 
 from __future__ import annotations
@@ -24,7 +26,16 @@ class Config:
         "KRAKEN_SANDBOX": ("KRAKEN_SANDBOX", "sandbox"),
         "KRAKEN_RATE_LIMIT": ("KRAKEN_RATE_LIMIT", "rate_limit"),
         "KRAKEN_TIMEOUT": ("KRAKEN_TIMEOUT", "timeout"),
-        "KRAKEN_LOG_LEVEL": ("KRAKEN_LOG_LEVEL", "log_level"),
+        "KRAKEN_LOG_LEVEL": ("KRAKEN_LOG_LEVEL", "LOG_LEVEL", "log_level"),
+        "AUTO_TRADING_ENABLED": ("AUTO_TRADING_ENABLED",),
+        "AUTO_TRADING_CONFIG_PATH": ("AUTO_TRADING_CONFIG_PATH",),
+        "ALERT_WEBHOOK_URL": ("ALERT_WEBHOOK_URL",),
+        "ALERT_EMAIL_SENDER": ("ALERT_EMAIL_SENDER",),
+        "ALERT_EMAIL_RECIPIENTS": ("ALERT_EMAIL_RECIPIENTS",),
+        "ALERT_EMAIL_SMTP_SERVER": ("ALERT_EMAIL_SMTP_SERVER",),
+        "ALERT_EMAIL_SMTP_PORT": ("ALERT_EMAIL_SMTP_PORT",),
+        "ALERT_EMAIL_SMTP_USERNAME": ("ALERT_EMAIL_SMTP_USERNAME",),
+        "ALERT_EMAIL_SMTP_PASSWORD": ("ALERT_EMAIL_SMTP_PASSWORD",),
     }
 
     _DEFAULTS: Dict[str, Any] = {
@@ -34,6 +45,15 @@ class Config:
         "KRAKEN_RATE_LIMIT": 1,
         "KRAKEN_TIMEOUT": 30,
         "KRAKEN_LOG_LEVEL": "INFO",
+        "AUTO_TRADING_ENABLED": False,
+        "AUTO_TRADING_CONFIG_PATH": "configs/auto_trading.yaml",
+        "ALERT_WEBHOOK_URL": None,
+        "ALERT_EMAIL_SENDER": None,
+        "ALERT_EMAIL_RECIPIENTS": None,
+        "ALERT_EMAIL_SMTP_SERVER": None,
+        "ALERT_EMAIL_SMTP_PORT": 587,
+        "ALERT_EMAIL_SMTP_USERNAME": None,
+        "ALERT_EMAIL_SMTP_PASSWORD": None,
     }
 
     def __init__(self) -> None:
@@ -47,6 +67,15 @@ class Config:
         rate_limit_value = self._get_setting("KRAKEN_RATE_LIMIT")
         timeout_value = self._get_setting("KRAKEN_TIMEOUT")
         log_level_value = self._get_setting("KRAKEN_LOG_LEVEL")
+        auto_trading_enabled_value = self._get_setting("AUTO_TRADING_ENABLED")
+        auto_trading_config_value = self._get_setting("AUTO_TRADING_CONFIG_PATH")
+        alert_webhook_value = self._get_setting("ALERT_WEBHOOK_URL")
+        alert_email_sender_value = self._get_setting("ALERT_EMAIL_SENDER")
+        alert_email_recipients_value = self._get_setting("ALERT_EMAIL_RECIPIENTS")
+        alert_email_smtp_server_value = self._get_setting("ALERT_EMAIL_SMTP_SERVER")
+        alert_email_smtp_port_value = self._get_setting("ALERT_EMAIL_SMTP_PORT")
+        alert_email_smtp_username_value = self._get_setting("ALERT_EMAIL_SMTP_USERNAME")
+        alert_email_smtp_password_value = self._get_setting("ALERT_EMAIL_SMTP_PASSWORD")
 
         self.api_key: Optional[str] = (
             str(api_key_value).strip() if api_key_value else None
@@ -58,6 +87,15 @@ class Config:
         self.rate_limit: int = self._to_int(rate_limit_value, self._DEFAULTS["KRAKEN_RATE_LIMIT"])
         self.timeout: int = self._to_int(timeout_value, self._DEFAULTS["KRAKEN_TIMEOUT"])
         self.log_level: str = str(log_level_value or self._DEFAULTS["KRAKEN_LOG_LEVEL"]).upper()
+        self.auto_trading_enabled: bool = self._to_bool(auto_trading_enabled_value)
+        self.auto_trading_config_path: Path = Path(str(auto_trading_config_value or self._DEFAULTS["AUTO_TRADING_CONFIG_PATH"]))
+        self.alert_webhook_url: Optional[str] = str(alert_webhook_value).strip() if alert_webhook_value else None
+        self.alert_email_sender: Optional[str] = str(alert_email_sender_value).strip() if alert_email_sender_value else None
+        self.alert_email_recipients: list[str] = self._parse_recipients(alert_email_recipients_value)
+        self.alert_email_smtp_server: Optional[str] = str(alert_email_smtp_server_value).strip() if alert_email_smtp_server_value else None
+        self.alert_email_smtp_port: int = self._to_int(alert_email_smtp_port_value, self._DEFAULTS["ALERT_EMAIL_SMTP_PORT"])
+        self.alert_email_smtp_username: Optional[str] = str(alert_email_smtp_username_value).strip() if alert_email_smtp_username_value else None
+        self.alert_email_smtp_password: Optional[str] = str(alert_email_smtp_password_value).strip() if alert_email_smtp_password_value else None
 
     def _load_config_file(self) -> Dict[str, Any]:
         """Load configuration values from config.json if available."""
@@ -106,6 +144,15 @@ class Config:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _parse_recipients(value: Any) -> list[str]:
+        """Parse comma-separated email recipient list."""
+        if not value:
+            return []
+        if isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [item.strip() for item in str(value).split(",") if item.strip()]
+
     def has_credentials(self) -> bool:
         """Check if API credentials are configured."""
         return bool(self.api_key and self.api_secret)
@@ -144,3 +191,11 @@ class Config:
             return False
 
         return True
+
+    def get_auto_trading_config_path(self) -> Path:
+        """Return path to the auto trading configuration file."""
+        return self.auto_trading_config_path
+
+    def alerts_enabled(self) -> bool:
+        """Return True when any alert channel is configured."""
+        return bool(self.alert_webhook_url or self.alert_email_recipients)
