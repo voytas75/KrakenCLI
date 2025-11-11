@@ -33,7 +33,7 @@ console = Console()
 config = Config()
 
 # Setup logging
-setup_logging()
+setup_logging(log_level=config.log_level)
 
 def _convert_to_kraken_asset(currency_code: str) -> str:
     """Convert common currency codes to Kraken format"""

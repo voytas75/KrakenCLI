@@ -8,11 +8,15 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 
-def setup_logging(log_level: str = "INFO", 
-                 log_file: str = "kraken_cli.log",
-                 max_bytes: int = 10 * 1024 * 1024,  # 10MB
-                 backup_count: int = 5) -> None:
+def setup_logging(log_level: str = "INFO",
+                  log_file: str = "kraken_cli.log",
+                  max_bytes: int = 10 * 1024 * 1024,  # 10MB
+                  backup_count: int = 5) -> None:
     """Setup logging configuration"""
+
+    normalized_level = log_level.upper() if isinstance(log_level, str) else "INFO"
+    if normalized_level not in logging._nameToLevel:
+        normalized_level = "INFO"
     
     # Create logs directory if it doesn't exist
     log_dir = Path(__file__).parent.parent / "logs"
@@ -20,7 +24,7 @@ def setup_logging(log_level: str = "INFO",
     
     # Create logger
     logger = logging.getLogger()
-    logger.setLevel(getattr(logging, log_level.upper()))
+    logger.setLevel(logging._nameToLevel[normalized_level])
     
     # Remove existing handlers
     logger.handlers.clear()
@@ -41,7 +45,7 @@ def setup_logging(log_level: str = "INFO",
     
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(getattr(logging, log_level.upper()))
+    console_handler.setLevel(logging._nameToLevel[normalized_level])
     console_handler.setFormatter(formatter)
     
     # Add handlers to logger
