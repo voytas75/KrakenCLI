@@ -57,6 +57,7 @@ Kraken Pro Trading CLI is a Python 3.12+ application that interacts with the 202
 - Risk manager enforcing position sizing, daily loss caps, and stop management.
 - Background trading service controllable via new `auto-*` CLI commands.
 - Backtesting toolkit for historical validation and performance scoring.
+- Optional TA-Lib/pandas-ta integration for accelerated indicators (falls back to built-in math when absent).
 
 ## Quick Start
 
@@ -82,7 +83,7 @@ Kraken Pro Trading CLI is a Python 3.12+ application that interacts with the 202
    ```bash
    pip install -r requirements.txt
    ```
-   > **TA-Lib prerequisites**: install system libraries first (`sudo apt-get install ta-lib` on Debian/Ubuntu or `brew install ta-lib` on macOS).
+   > Optional: install `ta-lib` or `pandas-ta` for hardware-accelerated indicators. The CLI ships with pure-Python fallbacks.
 4. Create a `.env` file either by copying the template or running the interactive wizard:
    ```bash
    cp .env.template .env            # or

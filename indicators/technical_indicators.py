@@ -1,13 +1,14 @@
 """
-Technical indicator helpers with TA-Lib and pandas-ta fallbacks.
+Technical indicator helpers with TA-Lib and pure-Python fallbacks.
 
-Updates: v0.9.0 - 2025-11-11 - Added core indicator calculations for automated strategies.
+Updates:
+    v0.9.0 - 2025-11-11 - Added core indicator calculations for automated strategies.
+    v0.9.1 - 2025-11-11 - Added pure-Python RSI and MACD fallbacks to avoid hard dependency on pandas-ta.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import pandas as pd
 
@@ -17,13 +18,13 @@ try:
     import talib  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     talib = None
-    logger.debug("TA-Lib not available; falling back to pandas-ta when possible.")
+    logger.debug("TA-Lib not available; falling back to pure-Python indicators.")
 
 try:
     import pandas_ta as pta  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     pta = None
-    logger.debug("pandas-ta not available; limited indicator support.")
+    logger.debug("pandas-ta not available; using built-in indicator implementations.")
 
 
 class TechnicalIndicators:
@@ -37,14 +38,48 @@ class TechnicalIndicators:
             raise ValueError(f"{name} series must contain data.")
 
     @staticmethod
+    def _wilder_ewm(series: pd.Series, period: int) -> pd.Series:
+        """Wilder's exponential moving average (alpha = 1/period)."""
+        return series.ewm(alpha=1 / period, adjust=False).mean()
+
+    @staticmethod
+    def _rsi_manual(close: pd.Series, period: int) -> pd.Series:
+        """Pure-Python RSI based on Wilder's smoothing."""
+        delta = close.diff()
+        gain = delta.clip(lower=0.0)
+        loss = -delta.clip(upper=0.0)
+
+        avg_gain = TechnicalIndicators._wilder_ewm(gain, period)
+        avg_loss = TechnicalIndicators._wilder_ewm(loss, period)
+
+        rs = avg_gain / avg_loss.replace(to_replace=0.0, value=pd.NA)
+        rsi = 100 - (100 / (1 + rs))
+
+        rsi = rsi.where(avg_loss > 0, 100.0)
+        rsi = rsi.where(avg_gain > 0, 0.0)
+        rsi = rsi.where((avg_gain > 0) | (avg_loss > 0), 50.0)
+
+        return rsi.fillna(50.0).rename("rsi")
+
+    @staticmethod
     def rsi(close: pd.Series, period: int = 14) -> pd.Series:
         """Return Relative Strength Index values."""
         TechnicalIndicators._validate_series(close, "RSI close")
         if talib is not None:
-            return pd.Series(talib.RSI(close.values, timeperiod=period), index=close.index)
+            return pd.Series(talib.RSI(close.values, timeperiod=period), index=close.index, name="rsi")
         if pta is not None:
-            return pta.rsi(close, length=period)
-        raise ImportError("Neither TA-Lib nor pandas-ta is available for RSI calculation.")
+            return pta.rsi(close, length=period).rename("rsi")
+        return TechnicalIndicators._rsi_manual(close, period)
+
+    @staticmethod
+    def _macd_manual(close: pd.Series, fast: int, slow: int, signal: int) -> pd.DataFrame:
+        """Pure-Python MACD implementation using EMA calculations."""
+        ema_fast = TechnicalIndicators.ema(close, fast)
+        ema_slow = TechnicalIndicators.ema(close, slow)
+        macd_line = (ema_fast - ema_slow).rename("macd")
+        signal_line = macd_line.ewm(span=signal, adjust=False).mean().rename("signal")
+        hist = (macd_line - signal_line).rename("hist")
+        return pd.concat([macd_line, signal_line, hist], axis=1)
 
     @staticmethod
     def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
@@ -68,7 +103,7 @@ class TechnicalIndicators:
         if pta is not None:
             macd_df = pta.macd(close, fast=fast, slow=slow, signal=signal)
             return macd_df.rename(columns={"MACD_12_26_9": "macd", "MACDs_12_26_9": "signal", "MACDh_12_26_9": "hist"})
-        raise ImportError("Neither TA-Lib nor pandas-ta is available for MACD calculation.")
+        return TechnicalIndicators._macd_manual(close, fast, slow, signal)
 
     @staticmethod
     def sma(close: pd.Series, period: int = 20) -> pd.Series:
@@ -127,4 +162,3 @@ class TechnicalIndicators:
         )
         tr = true_range.max(axis=1)
         return tr.rolling(window=period, min_periods=period).mean().rename(f"atr_{period}")
-

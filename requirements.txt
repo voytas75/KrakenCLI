@@ -12,5 +12,3 @@ schedule==1.2.1
 websockets==12.0
 scipy==1.12.0
 scikit-learn==1.4.2
-pandas-ta==0.3.14b0
-TA-Lib==0.4.28
