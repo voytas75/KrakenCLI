@@ -1,7 +1,9 @@
 """
 Strategy manager responsible for loading YAML configs and instantiating strategies.
 
-Updates: v0.9.0 - 2025-11-11 - Added configurable strategy management and factory utilities.
+Updates:
+    v0.9.0 - 2025-11-11 - Added configurable strategy management and factory utilities.
+    v0.9.1 - 2025-11-11 - Registered MACD and moving average crossover strategies.
 """
 
 from __future__ import annotations
@@ -13,12 +15,16 @@ from typing import Dict, Iterable, List, Optional, Type
 import yaml
 
 from strategies.base_strategy import BaseStrategy, StrategyConfig
+from strategies.macd_strategy import MACDStrategy
+from strategies.ma_crossover_strategy import MovingAverageCrossoverStrategy
 from strategies.rsi_strategy import RSIStrategy
 
 logger = logging.getLogger(__name__)
 
 STRATEGY_REGISTRY: Dict[str, Type[BaseStrategy]] = {
     "rsi": RSIStrategy,
+    "macd": MACDStrategy,
+    "ma_crossover": MovingAverageCrossoverStrategy,
 }
 
 
@@ -100,4 +106,3 @@ class StrategyManager:
             except Exception as exc:
                 logger.error("Failed to initialise strategy %s: %s", key, exc)
         return strategies
-
