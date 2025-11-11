@@ -35,6 +35,13 @@ config = Config()
 # Setup logging
 setup_logging(log_level=config.log_level)
 
+
+def _get_active_log_level() -> str:
+    """Return the currently configured logging level name."""
+    level = logging.getLogger().getEffectiveLevel()
+    return logging.getLevelName(level)
+
+
 def _convert_to_kraken_asset(currency_code: str) -> str:
     """Convert common currency codes to Kraken format"""
     # Common currency mappings
@@ -106,6 +113,8 @@ def status(ctx):
     """Show account status and connectivity"""
     # Get API client from context, or create if not available
     api_client = ctx.obj.get('api_client')
+
+    console.print(f"ℹ️  Current log level: [cyan]{_get_active_log_level()}[/cyan]")
     
     if api_client is None:
         # Check if API credentials are configured and create client
@@ -133,6 +142,7 @@ def status(ctx):
         balance = api_client.get_account_balance()
         
         console.print("[green]✅ Connection successful![/green]")
+        console.print(f"[bold white]Logger Level:[/bold white] [cyan]{_get_active_log_level()}[/cyan]")
         # Get server time from result field (2025 API format: {"error": [], "result": {}})
         server_time = time_info.get('result', {})
         if 'unixtime' in server_time:
@@ -677,6 +687,8 @@ def info(ctx, pairs):
     """Show Kraken market information"""
     # Get API client from context, or create if not available
     api_client = ctx.obj.get('api_client')
+
+    console.print(f"ℹ️  Current log level: [cyan]{_get_active_log_level()}[/cyan]")
     
     if api_client is None:
         # Check if API credentials are configured and create client
@@ -854,8 +866,10 @@ def config_setup():
 @cli.command()
 def info():
     """Show application information and warnings"""
+    log_level_line = f"[bold white]Current Log Level:[/bold white] [cyan]{_get_active_log_level()}[/cyan]"
     panel = Panel.fit(
         "[bold cyan]Kraken Pro Trading CLI[/bold cyan]\n\n"
+        f"{log_level_line}\n\n"
         "[bold yellow]⚠️  IMPORTANT RISK WARNINGS:[/bold yellow]\n"
         "• Cryptocurrency trading involves substantial risk\n"
         "• Past performance does not guarantee future results\n"
