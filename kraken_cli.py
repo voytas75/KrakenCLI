@@ -195,6 +195,75 @@ def _create_trading_engine(ctx, poll_interval: int):
     )
     return engine
 
+
+def _display_auto_start_summary(
+    engine: Any,
+    strategy_keys: Optional[Sequence[str]],
+    pair_list: Optional[Sequence[str]],
+    timeframe: Optional[str],
+    interval: int,
+    dry_run: bool,
+) -> None:
+    """Render a Rich summary describing the upcoming automated trading run."""
+    strategy_manager = getattr(engine, "strategy_manager", None)
+    if strategy_manager is None:
+        console.print("[yellow]⚠️  Strategy manager unavailable; skipping summary.[/yellow]")
+        return
+
+    # Reload configurations so the summary reflects current YAML contents.
+    strategy_manager.refresh()
+
+    available_keys = list(strategy_manager.available())
+    if not available_keys:
+        console.print("[yellow]⚠️  No strategies configured. Update auto_trading.yaml to enable automation.[/yellow]")
+        return
+
+    if strategy_keys:
+        missing = [key for key in strategy_keys if key not in available_keys]
+        if missing:
+            console.print(f"[yellow]⚠️  Unknown strategy keys ignored: {', '.join(missing)}[/yellow]")
+
+    table = Table(title="Auto Trading Plan", expand=False)
+    table.add_column("Strategy", style="cyan")
+    table.add_column("State", style="green")
+    table.add_column("Timeframe", style="magenta")
+    table.add_column("Configured Pairs", style="yellow")
+
+    selected_keys = set(strategy_keys or available_keys)
+    for key in available_keys:
+        config_entry = strategy_manager.get_config(key)
+        enabled = config_entry.enabled
+        will_run = enabled and (not strategy_keys or key in selected_keys)
+        status_text = "✅ Running" if will_run else ("⏸️ Disabled" if not enabled else "🚫 Skipped")
+
+        configured_pairs = config_entry.parameters.get("pairs") or config_entry.parameters.get("symbols") or ["ETHUSD"]
+        if isinstance(configured_pairs, str):
+            pairs_display = configured_pairs
+        elif isinstance(configured_pairs, (list, tuple, set)):
+            pairs_display = ", ".join(str(item) for item in configured_pairs)
+        else:
+            pairs_display = str(configured_pairs)
+
+        display_timeframe = timeframe or config_entry.timeframe
+
+        table.add_row(
+            config_entry.name or key,
+            status_text,
+            display_timeframe,
+            pairs_display,
+        )
+
+    effective_pairs = ", ".join(pair_list) if pair_list else "Strategy defaults"
+    summary_panel = Panel(
+        table,
+        title="Automated Trading Summary",
+        subtitle=(
+            f"Mode: {'Dry-run' if dry_run else 'Live'}  •  Interval: {interval}s  •  Pairs: {effective_pairs}"
+        ),
+        border_style="blue",
+    )
+    console.print(summary_panel)
+
 @cli.command()
 @click.pass_context
 def status(ctx):
@@ -991,6 +1060,14 @@ def auto_start(
     )
 
     try:
+        _display_auto_start_summary(
+            engine=engine,
+            strategy_keys=strategy_keys,
+            pair_list=pair_list,
+            timeframe=timeframe,
+            interval=interval,
+            dry_run=dry_run,
+        )
         engine.run_forever(
             strategy_keys=strategy_keys,
             dry_run=dry_run,
