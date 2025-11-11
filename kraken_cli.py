@@ -424,7 +424,37 @@ def order(ctx, pair, side, order_type, volume, price, price2, execute, validate,
             console.print("[red]❌ Failed to place order[/red]")
             
     except Exception as e:
-        console.print(f"[red]❌ Error placing order: {str(e)}[/red]")
+        error_message = str(e)
+        if 'insufficient funds' in error_message.lower():
+            console.print("[red]❌ Order rejected: insufficient funds.[/red]")
+            try:
+                balances = trader.api_client.get_account_balance()
+                balance_data = balances.get('result', {}) if balances else {}
+            except Exception as balance_error:
+                console.print(f"[yellow]⚠️ Unable to retrieve balances: {balance_error}[/yellow]")
+                balance_data = {}
+            
+            if balance_data:
+                balance_table = Table(title="Current Account Balances")
+                balance_table.add_column("Asset", style="cyan")
+                balance_table.add_column("Balance", style="green")
+                
+                shown = 0
+                for asset, amount in balance_data.items():
+                    try:
+                        amount_float = float(amount)
+                    except (TypeError, ValueError):
+                        amount_float = 0.0
+                    if amount_float > 0:
+                        balance_table.add_row(asset, format_currency(amount))
+                        shown += 1
+                if shown > 0:
+                    console.print(balance_table)
+                else:
+                    console.print("[yellow]⚠️ No positive balances available to display.[/yellow]")
+            console.print("[yellow]💡 Reduce the order size or deposit funds to proceed.[/yellow]")
+        else:
+            console.print(f"[red]❌ Error placing order: {error_message}[/red]")
 
 @cli.command()
 @click.option('--status', '-s', help='Filter by order status (open, closed, any)')
