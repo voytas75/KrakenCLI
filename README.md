@@ -365,23 +365,37 @@ The application creates detailed logs in the `logs/` directory:
 ## File Structure
 
 ```
-kraken-cli/
+KrakenCLI/
 ├── kraken_cli.py           # Main CLI application
-├── config.py              # Configuration management
-├── requirements.txt       # Python dependencies
-├── .env.template         # Environment template
-├── .env                  # Your configuration (create this)
+├── config.py               # Configuration management helper
 ├── api/
-│   └── kraken_client.py  # Kraken API client
-├── trading/
-│   └── trader.py         # Trading operations
+│   └── kraken_client.py    # Kraken REST client
 ├── portfolio/
-│   └── portfolio_manager.py  # Portfolio management
+│   └── portfolio_manager.py  # Portfolio handling
+├── trading/
+│   └── trader.py           # Order placement routines
 ├── utils/
-│   ├── logger.py         # Logging configuration
-│   └── helpers.py        # Utility functions
-└── logs/                 # Log files (created automatically)
+│   ├── helpers.py          # Formatting helpers
+│   └── logger.py           # Logging configuration
+├── tests/                  # CLI smoke and debug scripts
+│   ├── comprehensive_test.py
+│   ├── final_demo.py
+│   ├── final_test_summary.py
+│   ├── test_kraken_pairs.py
+│   ├── test_pair_resolution.py
+│   ├── test_ticker_debug.py
+│   └── test_ticker_fix.py
+├── test_orders_fix.py      # Standalone orders regression check
+├── run_tests.sh / run_tests.bat
+├── requirements.txt        # Python dependencies
+├── .env.template           # Environment template (copy to .env)
+├── AGENTS.md               # Codex project guide
+├── kcliblueprint.md        # Architectural blueprint
+├── README.md               # Project documentation
+└── logs/                   # Rotating log files (created automatically)
 ```
+
+`.env` is created locally after copying from `.env.template` or running `python kraken_cli.py config-setup`.
 
 ## Development
 
