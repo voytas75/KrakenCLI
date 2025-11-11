@@ -235,9 +235,33 @@ KRAKEN_SANDBOX=false
 # Public: 1 req/sec, Private: 15-20 req/min
 KRAKEN_RATE_LIMIT=1
 
+# Request timeout
+KRAKEN_TIMEOUT=30
+
 # Logging level
-LOG_LEVEL=INFO
+KRAKEN_LOG_LEVEL=INFO
 ```
+
+### Configuration Precedence
+
+The CLI now honours the following order when resolving settings:
+1. **Runtime environment variables** (e.g. those exported in your shell)
+2. **`.env` file values** loaded via `python-dotenv`
+3. **`config.json` defaults** stored alongside the codebase
+4. **Built-in defaults** shipped with the application
+
+`config.json` is optional and useful for non-sensitive defaults such as rate limits:
+
+```json
+{
+  "sandbox": false,
+  "rate_limit": 1,
+  "timeout": 30,
+  "log_level": "INFO"
+}
+```
+
+⚠️ Avoid storing real API secrets in `config.json`; prefer environment variables or `.env`.
 
 ### API Setup for 2025
 
