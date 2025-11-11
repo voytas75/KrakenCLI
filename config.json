@@ -1,8 +1,0 @@
-{
-  "api_key": "",
-  "api_secret": "",
-  "sandbox": false,
-  "rate_limit": 1,
-  "timeout": 30,
-  "log_level": "INFO"
-}
