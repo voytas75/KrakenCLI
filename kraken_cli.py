@@ -343,14 +343,31 @@ def order(ctx, pair, side, order_type, volume, price, price2, execute, validate,
             return
     
     try:
+        parsed_price = None
+        parsed_price2 = None
+
+        if price is not None:
+            try:
+                parsed_price = float(price)
+            except ValueError:
+                console.print("[red]❌ Invalid price value. Please provide a numeric price.[/red]")
+                return
+
+        if price2 is not None:
+            try:
+                parsed_price2 = float(price2)
+            except ValueError:
+                console.print("[red]❌ Invalid secondary price value. Please provide a numeric value.[/red]")
+                return
+
         console.print(f"[bold blue]📝 Placing {side} order for {pair}...[/bold blue]")
         
         # Validate order parameters
-        if order_type in ['limit', 'take-profit'] and not price:
+        if order_type in ['limit', 'take-profit'] and parsed_price is None:
             console.print("[red]❌ Limit price required for limit/take-profit orders[/red]")
             return
         
-        if order_type in ['stop-loss', 'take-profit'] and not price2:
+        if order_type in ['stop-loss', 'take-profit'] and parsed_price2 is None:
             console.print("[red]❌ Secondary price required for stop-loss/take-profit orders[/red]")
             return
         
@@ -362,10 +379,10 @@ def order(ctx, pair, side, order_type, volume, price, price2, execute, validate,
             'volume': volume
         }
         
-        if price:
-            order_params['price'] = price
-        if price2:
-            order_params['price2'] = price2
+        if parsed_price is not None:
+            order_params['price'] = parsed_price
+        if parsed_price2 is not None:
+            order_params['price2'] = parsed_price2
         
         if execute and validate:
             console.print("[red]❌ Conflicting flags: use either --execute or --validate, not both[/red]")
@@ -381,10 +398,10 @@ def order(ctx, pair, side, order_type, volume, price, price2, execute, validate,
         summary_table.add_row("Side", side.upper())
         summary_table.add_row("Type", order_type.upper())
         summary_table.add_row("Volume", str(volume))
-        if price:
-            summary_table.add_row("Price", str(price))
-        if price2:
-            summary_table.add_row("Secondary Price", str(price2))
+        if parsed_price is not None:
+            summary_table.add_row("Price", str(parsed_price))
+        if parsed_price2 is not None:
+            summary_table.add_row("Secondary Price", str(parsed_price2))
         console.print(summary_table)
 
         if not dry_run and not yes:
