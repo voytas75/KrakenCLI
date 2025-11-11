@@ -54,7 +54,7 @@ examples/
 .roo/
 AGENTS.md
 AGENTS*.md
-ctmblueprint.md
+kcliblueprint.md
 .coverage
 .mypy_cache/
 .nox/
