@@ -305,14 +305,16 @@ def ticker(ctx, base, quote, pair):
 @cli.command()
 @click.option('--pair', '-p', required=True, help='Trading pair (e.g., XBTUSD)')
 @click.option('--side', '-s', type=click.Choice(['buy', 'sell']), required=True, help='Order side')
-@click.option('--order-type', '-t', type=click.Choice(['market', 'limit', 'stop-loss', 'take-profit']), 
+@click.option('--order-type', '-t', type=click.Choice(['market', 'limit', 'stop-loss', 'take-profit']),
               default='market', help='Order type')
 @click.option('--volume', '-v', required=True, type=float, help='Order volume')
 @click.option('--price', help='Limit price (required for limit orders)')
 @click.option('--price2', help='Secondary price (for stop-loss-profit orders)')
-@click.option('--validate', is_flag=True, help='Validate order only, do not place')
+@click.option('--execute', is_flag=True, help='Execute order after confirmation (default: dry-run validation)')
+@click.option('--validate', is_flag=True, help='Force validation-only mode (alias for default behaviour)')
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompt when executing (expert only)')
 @click.pass_context
-def order(ctx, pair, side, order_type, volume, price, price2, validate):
+def order(ctx, pair, side, order_type, volume, price, price2, execute, validate, yes):
     """Place a new order"""
     # Get trader from context, or create if not available
     trader = ctx.obj.get('trader')
@@ -365,26 +367,42 @@ def order(ctx, pair, side, order_type, volume, price, price2, validate):
         if price2:
             order_params['price2'] = price2
         
-        # Place the order
-        result = trader.place_order(**order_params)
+        if execute and validate:
+            console.print("[red]❌ Conflicting flags: use either --execute or --validate, not both[/red]")
+            return
+
+        dry_run = not execute or validate
+
+        summary_table = Table(title="Order Summary")
+        summary_table.add_column("Field", style="cyan")
+        summary_table.add_column("Value", style="green")
+        summary_table.add_row("Mode", "Dry-run (validate only)" if dry_run else "Live execution")
+        summary_table.add_row("Pair", pair)
+        summary_table.add_row("Side", side.upper())
+        summary_table.add_row("Type", order_type.upper())
+        summary_table.add_row("Volume", str(volume))
+        if price:
+            summary_table.add_row("Price", str(price))
+        if price2:
+            summary_table.add_row("Secondary Price", str(price2))
+        console.print(summary_table)
+
+        if not dry_run and not yes:
+            console.print("[yellow]⚠️ You are about to execute a live order.[/yellow]")
+            if not click.confirm("Do you want to proceed?", default=False):
+                console.print("[yellow]🚫 Order cancelled by user.[/yellow]")
+                return
+        
+        result = trader.place_order(validate=dry_run, **order_params)
         
         if result:
-            console.print("[green]✅ Order placed successfully![/green]")
-            console.print(f"Order ID: [cyan]{result.get('txid', ['Unknown'])[0]}[/cyan]")
-            
-            # Show order details
-            table = Table(title="Order Details")
-            table.add_column("Field", style="cyan")
-            table.add_column("Value", style="green")
-            
-            table.add_row("Pair", pair)
-            table.add_row("Side", side.upper())
-            table.add_row("Type", order_type.upper())
-            table.add_row("Volume", str(volume))
-            if price:
-                table.add_row("Price", str(price))
-            
-            console.print(table)
+            txid = result.get('result', {}).get('txid', ['Unknown'])
+            reference_id = txid[0] if txid else 'Unknown'
+            if dry_run:
+                console.print("[green]✅ Order validated successfully (no trade executed).[/green]")
+            else:
+                console.print("[green]✅ Order executed successfully![/green]")
+            console.print(f"Reference: [cyan]{reference_id}[/cyan]")
         else:
             console.print("[red]❌ Failed to place order[/red]")
             

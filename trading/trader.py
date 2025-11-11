@@ -15,10 +15,18 @@ class Trader:
     def __init__(self, api_client: KrakenAPIClient):
         self.api_client = api_client
         
-    def place_order(self, pair: str, type: str, ordertype: str, 
-                   volume: float, price: Optional[float] = None,
-                   price2: Optional[float] = None, leverage: Optional[str] = None,
-                   userref: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def place_order(
+        self,
+        pair: str,
+        type: str,
+        ordertype: str,
+        volume: float,
+        price: Optional[float] = None,
+        price2: Optional[float] = None,
+        leverage: Optional[str] = None,
+        userref: Optional[int] = None,
+        validate: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         """
         Place a new order
         
@@ -31,6 +39,7 @@ class Trader:
             price2: Secondary price for stop-loss/take-profit orders
             leverage: Leverage (optional)
             userref: User reference ID (optional)
+            validate: When True, perform a dry-run validation without execution
         
         Returns:
             Order result dictionary or None if failed
@@ -39,7 +48,8 @@ class Trader:
             # Validate inputs
             self._validate_order_params(pair, type, ordertype, volume, price, price2)
             
-            logger.info(f"Placing {type} order for {pair}: {volume} @ {price or 'market'}")
+            action = "Validating" if validate else "Executing"
+            logger.info(f"{action} {type} order for {pair}: {volume} @ {price or 'market'}")
             
             # Place the order
             result = self.api_client.add_order(
@@ -51,12 +61,12 @@ class Trader:
                 price2=price2,
                 leverage=leverage,
                 userref=userref,
-                validate=True  # Always validate before placing
+                validate=validate
             )
             
             if result and 'result' in result:
                 order_id = result['result'].get('txid', ['Unknown'])[0]
-                logger.info(f"Order placed successfully: {order_id}")
+                logger.info(f"Order {('validated' if validate else 'executed')} successfully: {order_id}")
                 return result
             
             logger.error("Order placement failed - no result data")

@@ -137,14 +137,16 @@ Displays current price, 24h change, volume, and market data.
 
 #### Place Orders
 
-**Market Order (Buy)**
+Orders run in **dry-run validation mode by default**. Add `--execute` to place a live order (you'll be prompted to confirm, or use `--yes` to bypass the prompt). Use `--validate` to explicitly force validation-only behaviour.
+
+**Market Order (Buy) – Dry Run**
 ```bash
 python kraken_cli.py order --pair XBTUSD --side buy --order-type market --volume 0.001
 ```
 
-**Limit Order (Sell)**
+**Limit Order (Sell) – Live Execution**
 ```bash
-python kraken_cli.py order --pair ETHUSD --side sell --order-type limit --volume 0.5 --price 2500
+python kraken_cli.py order --pair ETHUSD --side sell --order-type limit --volume 0.5 --price 2500 --execute
 ```
 
 **Stop-Loss Order**
@@ -200,6 +202,9 @@ python kraken_cli.py info
 - `--volume, -v`: Order volume
 - `--price`: Limit price (required for limit orders)
 - `--price2`: Secondary price (for stop-loss/take-profit orders)
+- `--execute`: Execute the order after confirmation (otherwise performs a dry-run)
+- `--validate`: Force validation-only mode (alias for default behaviour)
+- `--yes, -y`: Skip the execution confirmation prompt (use with caution)
 
 #### Ticker Command Options
 - `--pair, -p`: Trading pair (default: XBTUSD)
