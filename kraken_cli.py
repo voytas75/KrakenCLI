@@ -7,16 +7,18 @@ Updates: v0.9.0 - 2025-11-11 - Added automated trading engine commands and integ
 """
 
 import click
+import json
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Sequence
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich import print as rprint
+from typing import Any, Optional, Sequence
+
 from dotenv import load_dotenv
+from rich.console import Console
+from rich import print as rprint
+from rich.panel import Panel
+from rich.table import Table
 import logging
 
 # Add current directory to path for imports
@@ -28,10 +30,6 @@ from trading.trader import Trader
 from portfolio.portfolio_manager import PortfolioManager
 from utils.logger import setup_logging
 from utils.helpers import format_currency, format_percentage, format_asset_amount
-from engine import TradingEngine, TradingEngineStatus
-from strategies import StrategyManager
-from risk import RiskManager
-from indicators import TechnicalIndicators  # noqa: F401  # ensure optional deps resolved
 
 # Load environment variables
 load_dotenv()
@@ -45,6 +43,13 @@ setup_logging(log_level=config.log_level)
 AUTO_CONTROL_DIR = Path("logs/auto_trading")
 RISK_STATE_FILE = AUTO_CONTROL_DIR / "risk_state.json"
 AUTO_STATUS_FILE = AUTO_CONTROL_DIR / "status.json"
+
+TradingEngine: Any = None
+TradingEngineStatus: Any = None
+StrategyManager: Any = None
+RiskManager: Any = None
+_AUTO_MODULES_LOADED = False
+_AUTO_IMPORT_ERROR: Optional[Exception] = None
 
 
 def _get_active_log_level() -> str:
@@ -73,6 +78,42 @@ def _convert_to_kraken_asset(currency_code: str) -> str:
     }
     
     return conversions.get(currency_code.upper(), currency_code.upper())
+
+
+def _ensure_auto_modules() -> None:
+    """Lazy-load automated trading modules and cache failures."""
+    global TradingEngine, TradingEngineStatus, StrategyManager, RiskManager
+    global _AUTO_MODULES_LOADED, _AUTO_IMPORT_ERROR
+
+    if _AUTO_MODULES_LOADED:
+        if _AUTO_IMPORT_ERROR is not None:
+            raise _AUTO_IMPORT_ERROR
+        return
+
+    try:
+        from engine import TradingEngine as _TradingEngine, TradingEngineStatus as _TradingEngineStatus
+        from strategies import StrategyManager as _StrategyManager
+        from risk import RiskManager as _RiskManager
+    except Exception as exc:  # pragma: no cover - import guard
+        _AUTO_IMPORT_ERROR = exc
+        _AUTO_MODULES_LOADED = True
+        raise
+
+    TradingEngine = _TradingEngine
+    TradingEngineStatus = _TradingEngineStatus
+    StrategyManager = _StrategyManager
+    RiskManager = _RiskManager
+    _AUTO_IMPORT_ERROR = None
+    _AUTO_MODULES_LOADED = True
+
+
+def _format_auto_dependency_error(exc: Exception) -> str:
+    """Return a user-friendly error message for missing auto trading deps."""
+    message = str(exc)
+    hint = "Install optional dependencies: pip install pandas ta-lib pandas-ta"
+    if isinstance(exc, ModuleNotFoundError):
+        return f"{message}. {hint}"
+    return f"{message}. {hint}"
 
 @click.group()
 @click.pass_context  
@@ -120,12 +161,13 @@ def cli(ctx):
         ctx.obj['trader'] = None
 
 
-def _create_strategy_manager(config_obj: Config) -> StrategyManager:
+def _create_strategy_manager(config_obj: Config):
     """Instantiate a strategy manager for the configured YAML path."""
+    _ensure_auto_modules()
     return StrategyManager(config_obj.get_auto_trading_config_path())
 
 
-def _create_trading_engine(ctx, poll_interval: int) -> Optional[TradingEngine]:
+def _create_trading_engine(ctx, poll_interval: int):
     """Create a TradingEngine instance when prerequisites are available."""
     trader: Trader = ctx.obj.get('trader')
     portfolio: PortfolioManager = ctx.obj.get('portfolio')
@@ -135,8 +177,12 @@ def _create_trading_engine(ctx, poll_interval: int) -> Optional[TradingEngine]:
         console.print("[red]❌ Automated trading requires authenticated trader access.[/red]")
         return None
 
-    strategy_manager = _create_strategy_manager(config_obj)
-    risk_manager = RiskManager(RISK_STATE_FILE)
+    try:
+        strategy_manager = _create_strategy_manager(config_obj)
+        risk_manager = RiskManager(RISK_STATE_FILE)
+    except Exception as exc:
+        console.print(f"[red]❌ Unable to initialise automated trading modules: {_format_auto_dependency_error(exc)}[/red]")
+        return None
 
     engine = TradingEngine(
         trader=trader,
@@ -988,25 +1034,41 @@ def auto_status() -> None:
 
     try:
         payload = json.loads(AUTO_STATUS_FILE.read_text(encoding="utf-8"))
-        status = TradingEngineStatus.from_dict(payload)
     except (json.JSONDecodeError, OSError) as exc:
         console.print(f"[red]❌ Failed to read status: {exc}[/red]")
         return
+
+    status_obj = None
+    try:
+        _ensure_auto_modules()
+        status_obj = TradingEngineStatus.from_dict(payload)
+    except Exception as exc:
+        console.print(f"[yellow]⚠️  Automated trading modules unavailable: {_format_auto_dependency_error(exc)}[/yellow]")
+        status_obj = None
 
     table = Table(title="Auto Trading Status")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
 
-    table.add_row("Running", "✅" if status.running else "❌")
-    table.add_row("Dry Run", "✅" if status.dry_run else "❌")
-    table.add_row(
-        "Last Cycle",
-        status.last_cycle_at.isoformat() if status.last_cycle_at else "N/A",
-    )
-    table.add_row("Processed Signals", str(status.processed_signals))
-    table.add_row("Active Strategies", ", ".join(status.active_strategies) or "N/A")
-    table.add_row("Active Pairs", ", ".join(status.active_pairs) or "N/A")
-    table.add_row("Last Error", status.last_error or "None")
+    if status_obj is not None:
+        table.add_row("Running", "✅" if status_obj.running else "❌")
+        table.add_row("Dry Run", "✅" if status_obj.dry_run else "❌")
+        table.add_row(
+            "Last Cycle",
+            status_obj.last_cycle_at.isoformat() if status_obj.last_cycle_at else "N/A",
+        )
+        table.add_row("Processed Signals", str(status_obj.processed_signals))
+        table.add_row("Active Strategies", ", ".join(status_obj.active_strategies) or "N/A")
+        table.add_row("Active Pairs", ", ".join(status_obj.active_pairs) or "N/A")
+        table.add_row("Last Error", status_obj.last_error or "None")
+    else:
+        table.add_row("Running", "✅" if payload.get("running") else "❌")
+        table.add_row("Dry Run", "✅" if payload.get("dry_run", True) else "❌")
+        table.add_row("Last Cycle", payload.get("last_cycle_at", "N/A"))
+        table.add_row("Processed Signals", str(payload.get("processed_signals", 0)))
+        table.add_row("Active Strategies", ", ".join(payload.get("active_strategies", [])) or "N/A")
+        table.add_row("Active Pairs", ", ".join(payload.get("active_pairs", [])) or "N/A")
+        table.add_row("Last Error", payload.get("last_error") or "None")
 
     console.print(table)
 
