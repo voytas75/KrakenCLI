@@ -12,7 +12,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -205,6 +205,40 @@ def _display_auto_start_summary(
     dry_run: bool,
 ) -> None:
     """Render a Rich summary describing the upcoming automated trading run."""
+
+    def _summarise_config_section(
+        payload: Optional[dict],
+        preferred_keys: Sequence[str],
+        *,
+        max_items: int = 4,
+    ) -> str:
+        """Return a compact 'key=value' summary for parameters or risk settings."""
+        if not payload:
+            return "-"
+
+        summary: List[str] = []
+        seen: set[str] = set()
+
+        def _append(key: str, value: Any) -> None:
+            if value is None or key in seen:
+                return
+            seen.add(key)
+            summary.append(f"{key}={value}")
+
+        for key in preferred_keys:
+            if key in payload:
+                _append(key, payload[key])
+                if len(summary) >= max_items:
+                    break
+
+        if len(summary) < max_items:
+            for key, value in payload.items():
+                if len(summary) >= max_items:
+                    break
+                _append(key, value)
+
+        return ", ".join(summary) if summary else "-"
+
     strategy_manager = getattr(engine, "strategy_manager", None)
     if strategy_manager is None:
         console.print("[yellow]⚠️  Strategy manager unavailable; skipping summary.[/yellow]")
@@ -228,6 +262,8 @@ def _display_auto_start_summary(
     table.add_column("State", style="green")
     table.add_column("Timeframe", style="magenta")
     table.add_column("Configured Pairs", style="yellow")
+    table.add_column("Parameters", style="white")
+    table.add_column("Risk Levels", style="red")
 
     selected_keys = set(strategy_keys or available_keys)
     for key in available_keys:
@@ -245,12 +281,24 @@ def _display_auto_start_summary(
             pairs_display = str(configured_pairs)
 
         display_timeframe = timeframe or config_entry.timeframe
+        parameter_snapshot = _summarise_config_section(
+            config_entry.parameters,
+            ("rsi_period", "oversold", "overbought", "signal_threshold", "cooldown_bars", "fast", "slow", "window"),
+            max_items=4,
+        )
+        risk_snapshot = _summarise_config_section(
+            config_entry.risk,
+            ("position_size", "stop_loss", "take_profit", "max_daily_loss", "max_daily_trades", "min_trade_gap_minutes"),
+            max_items=3,
+        )
 
         table.add_row(
             config_entry.name or key,
             status_text,
             display_timeframe,
             pairs_display,
+            parameter_snapshot,
+            risk_snapshot,
         )
 
     effective_pairs = ", ".join(pair_list) if pair_list else "Strategy defaults"
