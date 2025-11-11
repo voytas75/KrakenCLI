@@ -187,3 +187,25 @@ def safe_float_convert(value: Union[str, float, int], default: float = 0.0) -> f
             return default
     except (ValueError, TypeError):
         return default
+
+
+def format_asset_amount(value: Union[str, float, int],
+                        asset: str,
+                        default_decimals: int = 8) -> str:
+    """Format an asset amount without duplicating the asset code."""
+    try:
+        stripped = str(value).replace('$', '').replace(',', '').strip()
+        amount = float(stripped)
+    except (ValueError, TypeError):
+        return str(value)
+
+    asset_upper = (asset or "").upper()
+    if asset_upper in {"USD", "ZUSD", "EUR", "ZEUR", "GBP", "ZGBP"}:
+        decimals = 2
+    else:
+        decimals = default_decimals
+
+    formatted = f"{amount:,.{decimals}f}"
+    if decimals > 0:
+        formatted = formatted.rstrip('0').rstrip('.')
+    return formatted or "0"

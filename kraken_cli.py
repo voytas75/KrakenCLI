@@ -24,7 +24,7 @@ from api.kraken_client import KrakenAPIClient
 from trading.trader import Trader
 from portfolio.portfolio_manager import PortfolioManager
 from utils.logger import setup_logging
-from utils.helpers import format_currency, format_percentage
+from utils.helpers import format_currency, format_percentage, format_asset_amount
 
 # Load environment variables
 load_dotenv()
@@ -795,31 +795,43 @@ def portfolio(ctx, pair):
         console.print("[bold blue]💼 Portfolio Overview[/bold blue]")
         
         # Get balances
-        balances = portfolio.get_balances()
+        summary = portfolio.get_portfolio_summary()
+        asset_rows = summary.get('significant_assets', []) if summary else []
         
-        if balances:
+        if asset_rows:
             table = Table(title="Asset Balances")
             table.add_column("Asset", style="cyan")
-            table.add_column("Balance", style="green")
-            table.add_column("Hold", style="yellow")
-            table.add_column("USD Value", style="blue")
+            table.add_column("Amount", justify="right", style="green")
+            table.add_column("USD Value", justify="right", style="blue")
             
-            for asset, amount in balances.items():
-                if float(amount) > 0.01:  # Only show significant balances
-                    usd_value = portfolio.get_usd_value(asset, float(amount))
-                    table.add_row(
-                        asset,
-                        format_currency(amount),
-                        "0.00",  # Hold amount not shown in balance endpoint
-                        format_currency(str(usd_value)) if usd_value else "N/A"
-                    )
+            for row in asset_rows:
+                asset_code = row.get('asset', 'N/A')
+                amount_value = row.get('amount', 0.0)
+                usd_value = row.get('usd_value')
+                
+                try:
+                    amount_float = float(amount_value)
+                except (ValueError, TypeError):
+                    amount_float = 0.0
+                
+                if amount_float <= 0:
+                    continue
+                
+                amount_text = format_asset_amount(amount_float, asset_code)
+                usd_text = format_currency(usd_value, decimals=2) if usd_value is not None else "N/A"
+                
+                table.add_row(asset_code, amount_text, usd_text)
             
             console.print(table)
             
-            # Show total value if possible
-            total_value = portfolio.get_total_usd_value()
-            if total_value:
-                console.print(f"\n[bold green]Total Portfolio Value: ${format_currency(str(total_value))}[/bold green]")
+            total_value = summary.get('total_usd_value') if summary else None
+            if total_value is not None:
+                console.print(f"\n[bold green]Total Portfolio Value: {format_currency(total_value, decimals=2)}[/bold green]")
+
+            missing_assets = summary.get('missing_assets') if summary else []
+            if missing_assets:
+                formatted_missing = ", ".join(sorted(set(missing_assets)))
+                console.print(f"[yellow]⚠️  No USD pricing available for: {formatted_missing}[/yellow]")
         
         # Get open positions
         positions = portfolio.get_open_positions()

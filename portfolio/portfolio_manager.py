@@ -3,7 +3,7 @@ Portfolio management for Kraken trading
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from api.kraken_client import KrakenAPIClient
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,150 @@ class PortfolioManager:
     
     def __init__(self, api_client: KrakenAPIClient):
         self.api_client = api_client
+        self._asset_info_loaded: bool = False
+        self._asset_altname_map: Dict[str, str] = {}
+        self._asset_price_by_symbol: Dict[str, Optional[float]] = {}
+        self._price_cache: Dict[str, Optional[float]] = {}
+        self._failed_price_assets: Set[str] = set()
+
+    def _load_asset_metadata(self) -> None:
+        """Load asset metadata and cache alt names for price lookups."""
+        if self._asset_info_loaded:
+            return
+        try:
+            response = self.api_client.get_asset_info()
+            assets = response.get('result', {}) if isinstance(response, dict) else {}
+            for asset_code, info in assets.items():
+                altname = info.get('altname') if isinstance(info, dict) else None
+                if altname:
+                    self._asset_altname_map[asset_code.upper()] = altname.upper()
+        except Exception as exc:
+            logger.debug("Failed to load asset metadata: %s", exc)
+        finally:
+            self._asset_info_loaded = True
+
+    @staticmethod
+    def _strip_suffixes(asset: str) -> str:
+        """Remove common Kraken suffixes such as .S or .F."""
+        normalized = asset.split('.')[0]
+        return normalized
+
+    def _normalize_asset_symbol(self, asset: str) -> str:
+        """Normalize Kraken asset codes to their spot trading symbol."""
+        asset_upper = (asset or "").upper()
+        self._load_asset_metadata()
+
+        # Prefer metadata altname if available
+        if asset_upper in self._asset_altname_map:
+            normalized = self._asset_altname_map[asset_upper]
+        else:
+            normalized = asset_upper
+
+        normalized = self._strip_suffixes(normalized)
+
+        # Manual overrides for common staked/future asset codes
+        overrides = {
+            "ADA.S": "ADA",
+            "ADA.F": "ADA",
+            "DOT.S": "DOT",
+            "DOT.F": "DOT",
+            "ETH.F": "ETH",
+            "ETH.S": "ETH",
+            "ETHW": "ETHW",
+            "XXDG": "XDG",
+        }
+        if asset_upper in overrides:
+            normalized = overrides[asset_upper]
+
+        # Remove Kraken-specific leading prefixes (X/Z) for spot assets
+        while normalized.startswith(('X', 'Z')) and len(normalized) > 3:
+            normalized = normalized[1:]
+
+        return normalized
+
+    @staticmethod
+    def _dedupe_preserve_order(values: List[str]) -> List[str]:
+        """Remove duplicates while preserving order."""
+        seen: Set[str] = set()
+        result: List[str] = []
+        for value in values:
+            if value not in seen:
+                seen.add(value)
+                result.append(value)
+        return result
+
+    def _build_price_pairs(self, base: str, quote: str = "USD") -> List[str]:
+        """Generate candidate Kraken pair identifiers for price lookups."""
+        base_upper = (base or "").upper()
+        quote_upper = (quote or "").upper()
+
+        core_base = self._strip_suffixes(base_upper)
+        base_variants = [
+            core_base,
+            f"X{core_base}",
+            f"Z{core_base}",
+            f"XX{core_base}",
+            base_upper,
+            f"X{base_upper}",
+            f"Z{base_upper}",
+        ]
+
+        # Include trimmed prefix variations (e.g., XXDG -> XDG)
+        if base_upper.startswith(('X', 'Z')) and len(base_upper) > 3:
+            trimmed = base_upper[1:]
+            base_variants.extend([
+                trimmed,
+                f"X{trimmed}",
+                f"Z{trimmed}",
+            ])
+
+        quote_variants = [
+            quote_upper,
+            f"Z{quote_upper}",
+        ]
+
+        pairs = []
+        for base_candidate in base_variants:
+            for quote_candidate in quote_variants:
+                pairs.append(f"{base_candidate}{quote_candidate}")
+
+        return self._dedupe_preserve_order(pairs)
+
+    def _get_price_for_pairs(self, candidate_pairs: List[str]) -> Optional[float]:
+        """Attempt to find a USD price for the provided pair candidates."""
+        for pair in candidate_pairs:
+            if pair in self._price_cache:
+                cached_price = self._price_cache[pair]
+                if cached_price is not None:
+                    return cached_price
+                continue
+
+            try:
+                ticker = self.api_client.get_ticker(pair)
+            except Exception as exc:
+                logger.debug("Ticker lookup failed for %s: %s", pair, exc)
+                self._price_cache[pair] = None
+                continue
+
+            result = ticker.get('result', {}) if isinstance(ticker, dict) else {}
+            if not result:
+                self._price_cache[pair] = None
+                continue
+
+            for key, payload in result.items():
+                close_values = payload.get('c') if isinstance(payload, dict) else None
+                if close_values and close_values[0]:
+                    try:
+                        close_price = float(close_values[0])
+                    except (ValueError, TypeError):
+                        continue
+                    self._price_cache[key] = close_price
+                    self._price_cache[pair] = close_price
+                    return close_price
+
+            self._price_cache[pair] = None
+
+        return None
         
     def get_balances(self) -> Dict[str, str]:
         """Get all account balances"""
@@ -89,52 +233,36 @@ class PortfolioManager:
             return []
     
     def get_usd_value(self, asset: str, amount: float) -> Optional[float]:
-        """Convert asset amount to USD value"""
+        """Convert asset amount to USD value."""
         try:
-            # For USD itself
-            if asset in ['ZUSD', 'USD']:
-                return amount
-            
-            # Try to get current price for the asset
-            pairs_to_try = [f"{asset}USD", f"X{asset}USD", f"Z{asset}USD"]
-            
-            for pair in pairs_to_try:
-                try:
-                    ticker = self.api_client.get_ticker(pair)
-                    if ticker and 'result' in ticker and pair in ticker['result']:
-                        price_data = ticker['result'][pair]
-                        if 'c' in price_data and price_data['c'][0]:
-                            price = float(price_data['c'][0])
-                            return amount * price
-                except:
-                    continue
-            
-            # If direct conversion failed, try using BTC as intermediate
-            try:
-                btc_ticker = self.api_client.get_ticker("XBTUSD")
-                if btc_ticker and 'result' in btc_ticker:
-                    btc_price = float(btc_ticker['result']['XXBTZUSD']['c'][0])
-                    
-                    # Get asset in BTC terms
-                    btc_pairs = [f"{asset}XBT", f"X{asset}XBT", f"Z{asset}XBT"]
-                    for pair in btc_pairs:
-                        try:
-                            asset_btc_ticker = self.api_client.get_ticker(pair)
-                            if asset_btc_ticker and 'result' in asset_btc_ticker and pair in asset_btc_ticker['result']:
-                                asset_btc_price = float(asset_btc_ticker['result'][pair]['c'][0])
-                                btc_amount = amount * asset_btc_price
-                                return btc_amount * btc_price
-                        except:
-                            continue
-            except:
-                pass
-            
-            logger.warning(f"Could not get USD value for {asset}")
+            amount_float = float(amount)
+        except (ValueError, TypeError):
+            logger.debug("Invalid amount for %s: %s", asset, amount)
             return None
-            
-        except Exception as e:
-            logger.error(f"Failed to get USD value for {asset}: {str(e)}")
+
+        if amount_float == 0:
+            return 0.0
+
+        asset_upper = (asset or "").upper()
+        if asset_upper in {"USD", "ZUSD"}:
+            return amount_float
+
+        normalized_symbol = self._normalize_asset_symbol(asset_upper)
+
+        if normalized_symbol in self._asset_price_by_symbol:
+            price = self._asset_price_by_symbol[normalized_symbol]
+        else:
+            candidate_pairs = self._build_price_pairs(normalized_symbol)
+            price = self._get_price_for_pairs(candidate_pairs)
+            self._asset_price_by_symbol[normalized_symbol] = price
+
+        if price is None:
+            if asset_upper not in self._failed_price_assets:
+                logger.warning("Could not get USD value for %s", asset_upper)
+                self._failed_price_assets.add(asset_upper)
             return None
+
+        return amount_float * price
     
     def get_total_usd_value(self) -> Optional[float]:
         """Calculate total portfolio value in USD"""
@@ -143,11 +271,15 @@ class PortfolioManager:
             total_value = 0.0
             
             for asset, amount_str in balances.items():
-                amount = float(amount_str)
-                if amount > 0.001:  # Only count significant amounts
-                    usd_value = self.get_usd_value(asset, amount)
-                    if usd_value:
-                        total_value += usd_value
+                try:
+                    amount = float(amount_str)
+                except (ValueError, TypeError):
+                    continue
+                if amount <= 0:
+                    continue
+                usd_value = self.get_usd_value(asset, amount)
+                if usd_value is not None:
+                    total_value += usd_value
             
             return total_value
         except Exception as e:
@@ -160,29 +292,46 @@ class PortfolioManager:
             balances = self.get_balances()
             positions = self.get_open_positions()
             orders = self.get_open_orders()
-            total_value = self.get_total_usd_value()
+            total_value = 0.0
             
             # Count significant assets
             significant_assets = []
+            missing_valuations: List[str] = []
             for asset, amount_str in balances.items():
-                amount = float(amount_str)
-                if amount > 0.001:
-                    usd_value = self.get_usd_value(asset, amount)
-                    significant_assets.append({
-                        'asset': asset,
-                        'amount': amount,
-                        'usd_value': usd_value or 0
-                    })
+                try:
+                    amount = float(amount_str)
+                except (ValueError, TypeError):
+                    continue
+                if amount <= 0:
+                    continue
+
+                usd_value = self.get_usd_value(asset, amount)
+                if usd_value is None:
+                    missing_valuations.append(asset)
+                else:
+                    total_value += usd_value
+
+                significant_assets.append({
+                    'asset': asset,
+                    'amount': amount,
+                    'usd_value': usd_value,
+                })
             
             # Sort by USD value
-            significant_assets.sort(key=lambda x: x['usd_value'], reverse=True)
+            significant_assets.sort(
+                key=lambda x: x['usd_value'] if x['usd_value'] is not None else 0.0,
+                reverse=True
+            )
             
+            total_usd_value = total_value if significant_assets else None
+
             return {
-                'total_usd_value': total_value,
+                'total_usd_value': total_usd_value,
                 'significant_assets': significant_assets,
                 'open_positions_count': len(positions),
                 'open_orders_count': len(orders),
-                'total_assets': len(balances)
+                'total_assets': len(balances),
+                'missing_assets': missing_valuations,
             }
         except Exception as e:
             logger.error(f"Failed to get portfolio summary: {str(e)}")
@@ -191,7 +340,8 @@ class PortfolioManager:
                 'significant_assets': [],
                 'open_positions_count': 0,
                 'open_orders_count': 0,
-                'total_assets': 0
+                'total_assets': 0,
+                'missing_assets': [],
             }
     
     def get_performance_metrics(self, days: int = 30) -> Dict[str, Any]:
