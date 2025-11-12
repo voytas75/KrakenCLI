@@ -2,6 +2,7 @@
 Configuration management for Kraken CLI.
 
 Updates: v0.9.0 - 2025-11-11 - Added automated trading and alert configuration options.
+Updates: v0.9.5 - 2025-11-13 - Adopted single Kraken API base URL per 2025 guidance.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ class Config:
         "KRAKEN_API_KEY": ("KRAKEN_API_KEY", "api_key"),
         "KRAKEN_API_SECRET": ("KRAKEN_API_SECRET", "api_secret"),
         "KRAKEN_SANDBOX": ("KRAKEN_SANDBOX", "sandbox"),
+        "KRAKEN_API_BASE_URL": ("KRAKEN_API_BASE_URL", "api_base_url"),
         "KRAKEN_RATE_LIMIT": ("KRAKEN_RATE_LIMIT", "rate_limit"),
         "KRAKEN_TIMEOUT": ("KRAKEN_TIMEOUT", "timeout"),
         "KRAKEN_LOG_LEVEL": ("KRAKEN_LOG_LEVEL", "LOG_LEVEL", "log_level"),
@@ -45,6 +47,7 @@ class Config:
         "KRAKEN_API_KEY": None,
         "KRAKEN_API_SECRET": None,
         "KRAKEN_SANDBOX": False,
+        "KRAKEN_API_BASE_URL": "https://api.kraken.com",
         "KRAKEN_RATE_LIMIT": 1,
         "KRAKEN_TIMEOUT": 30,
         "KRAKEN_LOG_LEVEL": "INFO",
@@ -70,6 +73,7 @@ class Config:
         api_key_value = self._get_setting("KRAKEN_API_KEY")
         api_secret_value = self._get_setting("KRAKEN_API_SECRET")
         sandbox_value = self._get_setting("KRAKEN_SANDBOX")
+        api_base_url_value = self._get_setting("KRAKEN_API_BASE_URL")
         rate_limit_value = self._get_setting("KRAKEN_RATE_LIMIT")
         timeout_value = self._get_setting("KRAKEN_TIMEOUT")
         log_level_value = self._get_setting("KRAKEN_LOG_LEVEL")
@@ -93,6 +97,9 @@ class Config:
             str(api_secret_value).strip() if api_secret_value else None
         )
         self.sandbox: bool = self._to_bool(sandbox_value)
+        self.api_base_url: str = self._normalise_base_url(
+            api_base_url_value, self._DEFAULTS["KRAKEN_API_BASE_URL"]
+        )
         self.rate_limit: int = self._to_int(rate_limit_value, self._DEFAULTS["KRAKEN_RATE_LIMIT"])
         self.timeout: int = self._to_int(timeout_value, self._DEFAULTS["KRAKEN_TIMEOUT"])
         self.log_level: str = str(log_level_value or self._DEFAULTS["KRAKEN_LOG_LEVEL"]).upper()
@@ -176,6 +183,16 @@ class Config:
             return [str(item).strip() for item in value if str(item).strip()]
         return [item.strip() for item in str(value).split(",") if item.strip()]
 
+    @staticmethod
+    def _normalise_base_url(value: Any, default: str) -> str:
+        """Normalise API base URL, ensuring no trailing slash."""
+        if value in (None, ""):
+            return default
+        text = str(value).strip()
+        if not text:
+            return default
+        return text.rstrip("/")
+
     def has_credentials(self) -> bool:
         """Check if API credentials are configured."""
         return bool(self.api_key and self.api_secret)
@@ -210,14 +227,12 @@ class Config:
         return self.timeout
 
     def is_sandbox(self) -> bool:
-        """Check if using sandbox environment."""
+        """Check if using sandbox environment (credentials drive endpoint access)."""
         return self.sandbox
 
     def get_api_url(self) -> str:
-        """Get Kraken API URL based on environment."""
-        if self.sandbox:
-            return "https://api-sandbox.kraken.com"
-        return "https://api.kraken.com"
+        """Return Kraken REST base URL (2025 unified endpoint)."""
+        return self.api_base_url
 
     def validate_credentials(self) -> bool:
         """Validate API credentials format."""

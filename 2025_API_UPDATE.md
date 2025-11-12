@@ -16,6 +16,7 @@ The Kraken Pro Trading CLI has been updated to comply with the latest 2025 Krake
 - **2025 Updated**: Single base URL `https://api.kraken.com` for all environments
 - **Sandbox Control**: Now managed via API key permissions
 - **Implementation**: Updated `config.py` and `api/kraken_client.py`
+- **Latest Adjustment (v0.9.5)**: `Config.get_api_url()` always resolves to the unified base URL, with an optional `KRAKEN_API_BASE_URL` override for advanced diagnostics.
 
 ### 3. **Rate Limiting Updates**
 - **2025 Specifications**:

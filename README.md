@@ -164,6 +164,7 @@ Precedence from highest to lowest:
 | `KRAKEN_API_KEY`    | Kraken API key (private endpoints)                 | `None`  |
 | `KRAKEN_API_SECRET` | Kraken API secret (base64 string)                  | `None`  |
 | `KRAKEN_SANDBOX`    | Toggle sandbox/test environment (`true`/`false`)   | `false` |
+| `KRAKEN_API_BASE_URL` | Override REST base URL (defaults to Kraken 2025 endpoint) | `https://api.kraken.com` |
 | `KRAKEN_RATE_LIMIT` | Requests per second throttle                       | `1`     |
 | `KRAKEN_TIMEOUT`    | HTTP request timeout in seconds                    | `30`    |
 | `KRAKEN_LOG_LEVEL`  | Root logger level (`INFO`, `DEBUG`, etc.)          | `INFO`  |
@@ -209,6 +210,8 @@ Create a Kraken API key with at least:
 ### Sandbox Mode
 
 Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and revert to `false` for live trading. The base URL remains `https://api.kraken.com`; sandbox behaviour is controlled by key entitlements.
+
+`KRAKEN_API_BASE_URL` should normally remain untouched. It exists for advanced troubleshooting when Kraken provides an alternate edge endpoint; the CLI still assumes the `/0/` path structure.
 
 ## Command Reference
 
