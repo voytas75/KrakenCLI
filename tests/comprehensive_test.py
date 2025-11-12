@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""
-Comprehensive test to verify all CLI command fixes
-"""
+"""Comprehensive test to verify all CLI command fixes."""
 
+from pathlib import Path
 import subprocess
 import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from config import Config
 
 def run_command(command):
     """Run a CLI command and capture the result"""
@@ -28,6 +33,9 @@ def test_all_commands():
     """Test all available CLI commands"""
     print("🧪 COMPREHENSIVE CLI TEST")
     print("=" * 50)
+
+    config = Config()
+    credentials_present = config.has_credentials()
     
     # Test commands that should work without credentials
     safe_commands = [
@@ -73,7 +81,10 @@ def test_all_commands():
         if returncode == 0 and stdout and "API credentials not configured" in stdout:
             print(f"✅ {desc}: PASSED (graceful error)")
         elif returncode == 0:
-            print(f"⚠️  {desc}: Unexpected success (may have credentials)")
+            if credentials_present:
+                print(f"✅ {desc}: PASSED (credentials detected)")
+            else:
+                print(f"⚠️  {desc}: Unexpected success (credentials detected via other source)")
         else:
             print(f"❌ {desc}: FAILED")
             if stderr:
