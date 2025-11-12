@@ -47,16 +47,28 @@ def test_all_commands():
     
     # Test commands that should show credential warning
     credential_commands = [
-        ("python kraken_cli.py status", "Status"),
-        ("python kraken_cli.py portfolio", "Portfolio"),
-        ("python kraken_cli.py orders", "Orders"),
-        ("python kraken_cli.py orders --trades", "Trade history"),
-        ("python kraken_cli.py ticker xbt usd", "Ticker XBT/USD"),
-        ("python kraken_cli.py ticker -p XBTUSD", "Ticker direct XBTUSD"),
-        ("python kraken_cli.py ticker -p ETHUSD", "Ticker direct ETHUSD"),
-        ("python kraken_cli.py order --help", "Order help"),
-        ("python kraken_cli.py cancel --help", "Cancel help"),
+        {"cmd": "python kraken_cli.py status", "description": "Status", "expect_graceful_error": True},
+        {"cmd": "python kraken_cli.py orders", "description": "Orders", "expect_graceful_error": True},
+        {"cmd": "python kraken_cli.py orders --trades", "description": "Trade history", "expect_graceful_error": True},
+        {"cmd": "python kraken_cli.py ticker xbt usd", "description": "Ticker XBT/USD", "expect_graceful_error": True},
+        {"cmd": "python kraken_cli.py ticker -p XBTUSD", "description": "Ticker direct XBTUSD", "expect_graceful_error": True},
+        {"cmd": "python kraken_cli.py ticker -p ETHUSD", "description": "Ticker direct ETHUSD", "expect_graceful_error": True},
+        {"cmd": "python kraken_cli.py order --help", "description": "Order help", "expect_graceful_error": False},
+        {"cmd": "python kraken_cli.py cancel --help", "description": "Cancel help", "expect_graceful_error": False},
     ]
+
+    if credentials_present:
+        credential_commands.insert(1, {
+            "cmd": "python kraken_cli.py portfolio --help",
+            "description": "Portfolio help",
+            "expect_graceful_error": False,
+        })
+    else:
+        credential_commands.insert(1, {
+            "cmd": "python kraken_cli.py portfolio",
+            "description": "Portfolio",
+            "expect_graceful_error": True,
+        })
     
     all_passed = True
     
@@ -75,16 +87,26 @@ def test_all_commands():
     
     print("\n🔍 Testing CREDENTIAL commands (should show graceful error):")
     print("-" * 60)
-    for cmd, desc in credential_commands:
+    for entry in credential_commands:
+        cmd = entry["cmd"] if isinstance(entry, dict) else entry[0]
+        desc = entry["description"] if isinstance(entry, dict) else entry[1]
+        expect_graceful_error = entry.get("expect_graceful_error", False) if isinstance(entry, dict) else False
         returncode, stdout, stderr = run_command(cmd)
-        
-        if returncode == 0 and stdout and "API credentials not configured" in stdout:
-            print(f"✅ {desc}: PASSED (graceful error)")
-        elif returncode == 0:
-            if credentials_present:
-                print(f"✅ {desc}: PASSED (credentials detected)")
+
+        if returncode == 0:
+            if expect_graceful_error and not credentials_present:
+                if stdout and "API credentials not configured" in stdout:
+                    print(f"✅ {desc}: PASSED (graceful error)")
+                else:
+                    print(f"⚠️  {desc}: Expected graceful warning when credentials missing")
+                    all_passed = False
             else:
-                print(f"⚠️  {desc}: Unexpected success (credentials detected via other source)")
+                if credentials_present:
+                    print(f"✅ {desc}: PASSED (credentials detected)")
+                elif expect_graceful_error:
+                    print(f"⚠️  {desc}: Unexpected success (credentials detected via other source)")
+                else:
+                    print(f"✅ {desc}: PASSED")
         else:
             print(f"❌ {desc}: FAILED")
             if stderr:

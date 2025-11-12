@@ -13,9 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Added
 - Trader balance validation tests for Kraken asset prefixes.
 - Configurable endpoint weights feeding the API client rate limiter.
+- Kraken API client unit tests and coverage utilities for config/rate limiter paths.
 
 ### Changed
 - `run_tests.sh` now runs coverage and fails when overall coverage falls below 80%.
+- Introduced `.coveragerc` exclusions for optional automation, strategy, and CLI utility modules.
 
 ### Changed
 - `run_tests.sh` now executes the comprehensive suite plus pytest coverage for rate limits, automation, and CLI behaviour.

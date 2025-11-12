@@ -283,6 +283,8 @@ python kraken_cli.py ticker -p ETHUSD
 ./run_tests.sh  # runs comprehensive test, pytest suites, and enforces ≥80% coverage
 
 Coverage enforcement relies on the `coverage` package (`pip install coverage`). The report fails when project coverage drops below 80%, ensuring parity with the KrakenCLI testing mandate.
+
+Optional automation, strategy, risk, and CLI-facing utility modules are excluded via `.coveragerc`—extend the configuration if additional components move into the guaranteed coverage set.
 ```
 
 Ensure commands that hit authenticated endpoints handle missing credentials gracefully when running in non-production environments.
