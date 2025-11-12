@@ -4,6 +4,7 @@ Risk management controls for automated trading.
 Updates:
     v0.9.0 - 2025-11-11 - Implemented baseline daily limits and position sizing rules.
     v0.9.2 - 2025-11-12 - Added stop loss/take profit handling, realised PnL tracking, and drawdown enforcement.
+    v0.9.3 - 2025-11-12 - Integrated alert notifications and daily loss guardrails.
 """
 
 from __future__ import annotations
@@ -13,9 +14,12 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from strategies.base_strategy import StrategyContext, StrategySignal
+
+if TYPE_CHECKING:
+    from alerts.alert_manager import AlertManager
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,7 @@ class _RiskState:
     daily_trades: int = 0
     history_by_pair: Dict[str, _TradeHistory] = field(default_factory=dict)
     positions: Dict[str, _PositionState] = field(default_factory=dict)
+    daily_loss_alerted: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialise state for disk persistence."""
@@ -96,6 +101,7 @@ class _RiskState:
             "daily_trades": self.daily_trades,
             "history_by_pair": serialised_history,
             "positions": {pair: position.to_dict() for pair, position in self.positions.items()},
+            "daily_loss_alerted": self.daily_loss_alerted,
         }
 
     @staticmethod
@@ -125,6 +131,7 @@ class _RiskState:
             except (TypeError, ValueError):
                 logger.debug("Failed to restore position for %s; skipping.", pair)
 
+        state.daily_loss_alerted = bool(payload.get("daily_loss_alerted", False))
         return state
 
 
@@ -141,10 +148,11 @@ class RiskManager:
         "take_profit": 0.06,
     }
 
-    def __init__(self, state_path: Path):
+    def __init__(self, state_path: Path, alert_manager: Optional["AlertManager"] = None):
         self.state_path = state_path
         self._state = self._load_state()
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self._alert_manager = alert_manager
 
     def _load_state(self) -> _RiskState:
         if not self.state_path.exists():
@@ -174,6 +182,7 @@ class RiskManager:
                 for pair, position in self._state.positions.items()
             }
             self._state = _RiskState(as_of=now, positions=preserved_positions)
+            self._state.daily_loss_alerted = False
             self._persist_state()
 
     def evaluate_signal(self, signal: StrategySignal, context: StrategyContext) -> RiskDecision:
@@ -224,6 +233,7 @@ class RiskManager:
         else:
             max_loss_allowed = float(limits["max_daily_loss"]) * account_equity
             if self._state.daily_loss >= max_loss_allowed:
+                self._trigger_daily_loss_alert(max_loss_allowed)
                 return RiskDecision(False, "Maximum daily drawdown reached; halting trades.")
 
         entry_price = float(context.ohlcv["close"].iloc[-1])
@@ -298,6 +308,14 @@ class RiskManager:
 
         self._state.as_of = now
         self._persist_state()
+
+        limits = self._merge_limits(context.config.risk)
+        account_equity = self._estimate_account_equity(context)
+        if account_equity > 0:
+            max_loss_allowed = float(limits["max_daily_loss"]) * account_equity
+            if self._state.daily_loss >= max_loss_allowed:
+                self._trigger_daily_loss_alert(max_loss_allowed)
+
         return realised_pnl
 
     def status(self) -> Dict[str, Any]:
@@ -325,6 +343,43 @@ class RiskManager:
             pair: position.to_dict()
             for pair, position in self._state.positions.items()
         }
+
+    def _trigger_daily_loss_alert(self, limit_amount: float) -> None:
+        """Emit a throttled alert when the daily loss limit is breached."""
+        if self._state.daily_loss_alerted:
+            return
+
+        self._state.daily_loss_alerted = True
+        self._persist_state()
+        self._send_alert(
+            event="risk.daily_loss_limit",
+            message="Maximum daily drawdown reached; trading halted.",
+            severity="ERROR",
+            details={
+                "daily_loss": round(self._state.daily_loss, 2),
+                "limit": round(limit_amount, 2),
+            },
+            cooldown=300,
+        )
+
+    def _send_alert(
+        self,
+        event: str,
+        message: str,
+        *,
+        severity: str = "INFO",
+        details: Optional[Dict[str, Any]] = None,
+        cooldown: Optional[float] = None,
+    ) -> None:
+        if self._alert_manager is None:
+            return
+        self._alert_manager.send(
+            event=event,
+            message=message,
+            severity=severity,
+            details=details,
+            cooldown=cooldown,
+        )
 
     @staticmethod
     def _merge_limits(risk_config: Dict[str, Any]) -> Dict[str, Any]:

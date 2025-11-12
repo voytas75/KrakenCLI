@@ -184,7 +184,7 @@ def _create_trading_engine(ctx, poll_interval: int):
 
     try:
         strategy_manager = _create_strategy_manager(config_obj)
-        risk_manager = RiskManager(RISK_STATE_FILE)
+        risk_manager = RiskManager(RISK_STATE_FILE, alert_manager=alert_manager)
     except Exception as exc:
         console.print(f"[red]❌ Unable to initialise automated trading modules: {_format_auto_dependency_error(exc)}[/red]")
         return None
@@ -1205,6 +1205,10 @@ def auto_status() -> None:
         table.add_row("Active Strategies", ", ".join(payload.get("active_strategies", [])) or "N/A")
         table.add_row("Active Pairs", ", ".join(payload.get("active_pairs", [])) or "N/A")
         table.add_row("Last Error", payload.get("last_error") or "None")
+
+    alert_snapshot = AlertManager(config=config, console=console).status()
+    table.add_row("Alerts Enabled", "✅" if alert_snapshot["enabled"] else "❌")
+    table.add_row("Alert Cooldown", f"{int(alert_snapshot['cooldown_seconds'])}s")
 
     console.print(table)
 

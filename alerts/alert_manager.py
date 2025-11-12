@@ -1,7 +1,7 @@
 """
 Centralised alert manager handling CLI and log notifications.
 
-Updates: v0.9.3 - 2025-11-12 - Added alert routing with enable/disable controls.
+Updates: v0.9.3 - 2025-11-12 - Added alert routing with enable/disable controls and event throttling.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -53,12 +54,15 @@ class AlertManager:
         config: Any,
         console: Optional[Console] = None,
         state_path: Optional[Path] = None,
+        throttle_seconds: float = 60.0,
     ):
         self._config = config
         self._console = console or Console()
         self._state_path = self._resolve_state_path(state_path)
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._state = self._load_state()
+        self._throttle_seconds = max(0.0, throttle_seconds)
+        self._last_sent: Dict[str, float] = {}
 
         default_enabled = False
         try:
@@ -120,6 +124,7 @@ class AlertManager:
             "enabled": self._enabled,
             "channels": channels,
             "state_path": str(self._state_path.resolve()),
+            "cooldown_seconds": self._throttle_seconds,
         }
 
     def _channels(self) -> Dict[str, bool]:
@@ -144,6 +149,9 @@ class AlertManager:
         message: str,
         severity: str = "INFO",
         details: Optional[Dict[str, Any]] = None,
+        *,
+        cooldown: Optional[float] = None,
+        force: bool = False,
     ) -> None:
         """Dispatch an alert if enabled, logging outcome and printing to console."""
         payload = AlertPayload(
@@ -153,12 +161,28 @@ class AlertManager:
             details=details or {},
         )
 
-        if not self._enabled:
+        if not self._enabled and not force:
             logger.debug("Alert skipped (disabled): %s - %s", payload.event, payload.message)
             return
 
+        if not self._should_emit(payload.event, cooldown):
+            logger.debug("Alert suppressed by throttle: %s", payload.event)
+            return
+
+        self._last_sent[payload.event] = time.monotonic()
         self._log_payload(payload)
         self._print_payload(payload)
+
+    def _should_emit(self, event: str, cooldown: Optional[float]) -> bool:
+        effective_cooldown = self._throttle_seconds if cooldown is None else max(0.0, cooldown)
+        if effective_cooldown == 0:
+            return True
+
+        last_timestamp = self._last_sent.get(event)
+        now = time.monotonic()
+        if last_timestamp is None:
+            return True
+        return (now - last_timestamp) >= effective_cooldown
 
     def _log_payload(self, payload: AlertPayload) -> None:
         level_map = {

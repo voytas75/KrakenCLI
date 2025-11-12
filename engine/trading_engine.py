@@ -183,10 +183,11 @@ class TradingEngine:
                     logger.exception("Trading engine cycle failed: %s", exc)
                     self._status.last_error = str(exc)
                     self._send_alert(
-                        event="engine.error",
+                        event="engine.cycle_error",
                         message=f"Trading engine cycle failed: {exc}",
                         severity="ERROR",
                         details={"cycle": cycle_count},
+                        cooldown=120,
                     )
                 finally:
                     self._persist_status()
@@ -202,6 +203,20 @@ class TradingEngine:
             self._status.running = False
             self._persist_status()
             self._clear_stop_flag()
+            severity = "WARNING" if self._status.last_error else "INFO"
+            message = "Trading engine stopped."
+            if self._status.last_error:
+                message = f"Trading engine stopped due to error: {self._status.last_error}"
+            self._send_alert(
+                event="engine.stopped",
+                message=message,
+                severity=severity,
+                details={
+                    "last_error": self._status.last_error,
+                    "last_cycle_at": self._status.last_cycle_at.isoformat() if self._status.last_cycle_at else None,
+                },
+                cooldown=0,
+            )
 
     def run_once(
         self,
@@ -255,6 +270,7 @@ class TradingEngine:
                                 "strategy": strategy.name,
                                 "confidence": f"{signal.confidence:.2f}",
                             },
+                            cooldown=180,
                         )
                         continue
 
@@ -275,6 +291,7 @@ class TradingEngine:
                                     message=f"Dry-run loss recorded for {pair}: {realised:.2f}",
                                     severity="INFO",
                                     details={"pair": pair, "strategy": strategy.name},
+                                    cooldown=180,
                                 )
                         continue
 
@@ -289,6 +306,7 @@ class TradingEngine:
                                     message=f"Realised loss recorded for {pair}: {realised:.2f}",
                                     severity="WARNING",
                                     details={"pair": pair, "strategy": strategy.name},
+                                    cooldown=120,
                                 )
                     time.sleep(self.rate_delay)
 
@@ -592,8 +610,15 @@ class TradingEngine:
         *,
         severity: str = "INFO",
         details: Optional[Dict[str, Any]] = None,
+        cooldown: Optional[float] = None,
     ) -> None:
         """Helper to forward alerts to the configured manager when available."""
         if self.alert_manager is None:
             return
-        self.alert_manager.send(event=event, message=message, severity=severity, details=details)
+        self.alert_manager.send(
+            event=event,
+            message=message,
+            severity=severity,
+            details=details,
+            cooldown=cooldown,
+        )

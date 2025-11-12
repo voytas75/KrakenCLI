@@ -42,7 +42,12 @@ class AlertManagerTests(unittest.TestCase):
     def test_enable_disable_persists_state(self) -> None:
         config = _StubConfig(enabled=False)
         console = Console(record=True)
-        manager = AlertManager(config, console=console, state_path=self.state_path)
+        manager = AlertManager(
+            config,
+            console=console,
+            state_path=self.state_path,
+            throttle_seconds=0,
+        )
 
         self.assertFalse(manager.is_enabled())
         manager.enable(source="test")
@@ -56,7 +61,12 @@ class AlertManagerTests(unittest.TestCase):
     def test_send_emits_console_output_when_enabled(self) -> None:
         config = _StubConfig(enabled=True, recipients=["alerts@example.com"])
         console = Console(record=True)
-        manager = AlertManager(config, console=console, state_path=self.state_path)
+        manager = AlertManager(
+            config,
+            console=console,
+            state_path=self.state_path,
+            throttle_seconds=0,
+        )
 
         manager.enable(source="test")
         manager.send(
@@ -72,7 +82,12 @@ class AlertManagerTests(unittest.TestCase):
 
     def test_status_reports_channels(self) -> None:
         config = _StubConfig(enabled=True, webhook="https://example.com", recipients=["ops@example.com"])
-        manager = AlertManager(config, console=Console(record=True), state_path=self.state_path)
+        manager = AlertManager(
+            config,
+            console=Console(record=True),
+            state_path=self.state_path,
+            throttle_seconds=0,
+        )
         summary = manager.status()
 
         self.assertIn("channels", summary)
@@ -81,6 +96,23 @@ class AlertManagerTests(unittest.TestCase):
         self.assertTrue(channels["logs"])
         self.assertTrue(channels["webhook_configured"])
         self.assertTrue(channels["email_configured"])
+        self.assertEqual(summary["cooldown_seconds"], 0)
+
+    def test_throttle_suppresses_repeated_alerts(self) -> None:
+        config = _StubConfig(enabled=True)
+        console = Console(record=True)
+        manager = AlertManager(
+            config,
+            console=console,
+            state_path=self.state_path,
+            throttle_seconds=60,
+        )
+
+        manager.enable(source="test")
+        manager.send(event="risk.test", message="Throttle check", severity="WARNING")
+        manager.send(event="risk.test", message="Throttle check", severity="WARNING")
+        output = console.export_text()
+        self.assertEqual(output.count("Throttle check"), 1)
 
 
 if __name__ == "__main__":  # pragma: no cover - test module entry point

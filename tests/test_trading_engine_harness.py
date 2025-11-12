@@ -170,6 +170,9 @@ class RecordingAlertManager:
         message: str,
         severity: str = "INFO",
         details: Optional[Dict[str, Any]] = None,
+        *,
+        cooldown: Optional[float] = None,
+        force: bool = False,
     ) -> None:
         self.records.append((event, message, severity, details or {}))
 
@@ -318,6 +321,31 @@ class TradingEngineHarnessTests(unittest.TestCase):
         self.assertEqual(severity, "WARNING")
         self.assertIn("Daily trade limit", message)
         self.assertEqual(details.get("pair"), "ETHUSD")
+        self.assertEqual(len(alert_recorder.records), 1)
+
+    def test_run_forever_emits_stop_alert(self) -> None:
+        decision = RiskDecision(
+            True,
+            "Approved",
+            volume=0.1,
+            position_fraction=0.1,
+            direction="long",
+            entry_price=3038.15,
+            stop_loss_price=None,
+            take_profit_price=None,
+            closing_position=False,
+        )
+        alert_recorder = RecordingAlertManager()
+        engine, _, _, _ = self._build_engine(
+            decision,
+            alert_manager=alert_recorder,
+        )
+
+        with mock.patch("time.sleep", return_value=None):
+            engine.run_forever(dry_run=True, max_cycles=1)
+
+        events = [event for event, *_ in alert_recorder.records]
+        self.assertIn("engine.stopped", events)
 
 
 class RiskManagerEvaluationTests(unittest.TestCase):
@@ -370,6 +398,26 @@ class RiskManagerEvaluationTests(unittest.TestCase):
         decision = self.risk_manager.evaluate_signal(self.signal, self.context)
         self.assertFalse(decision.approved)
         self.assertIn("Daily trade limit", decision.reason)
+
+    def test_daily_loss_alert_triggered_and_persisted(self) -> None:
+        alert_recorder = RecordingAlertManager()
+        manager = RiskManager(
+            Path(self.tempdir.name) / "risk_alert_state.json",
+            alert_manager=alert_recorder,
+        )
+        manager._state.daily_loss = 25.0
+        manager._state.daily_loss_alerted = False
+
+        decision = manager.evaluate_signal(self.signal, self.context)
+        self.assertFalse(decision.approved)
+        self.assertEqual(len(alert_recorder.records), 1)
+        event, _, severity, details = alert_recorder.records[0]
+        self.assertEqual(event, "risk.daily_loss_limit")
+        self.assertEqual(severity, "ERROR")
+        self.assertGreater(details.get("daily_loss", 0), details.get("limit", 0))
+
+        manager.evaluate_signal(self.signal, self.context)
+        self.assertEqual(len(alert_recorder.records), 1)
 
 
 class AutoCliTests(unittest.TestCase):
