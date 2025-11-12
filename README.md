@@ -59,6 +59,27 @@ Kraken Pro Trading CLI is a Python 3.12+ application that interacts with the 202
 - Backtesting toolkit for historical validation and performance scoring.
 - Optional TA-Lib/pandas-ta integration for accelerated indicators (falls back to built-in math when absent).
 
+#### Auto Trading Command Examples
+
+```bash
+# Inspect the YAML that drives automated strategies
+python kraken_cli.py auto-config --show
+
+# Launch the engine in dry-run mode for the default enabled strategies
+python kraken_cli.py auto-start --dry-run --interval 180
+
+# Target specific strategies and pairs while running live execution
+python kraken_cli.py auto-start --strategy rsi --strategy macd --pairs BTCUSD,ETHUSD --live
+
+# Review the last recorded engine status (updated each poll cycle)
+python kraken_cli.py auto-status
+
+# Ask a running engine to stop after the current cycle completes
+python kraken_cli.py auto-stop
+```
+
+Every automated command emits Rich-formatted summaries so you can confirm which strategies are active, the execution mode (dry-run vs live), and when the next polling cycle will occur.
+
 ## Quick Start
 
 ### Prerequisites
@@ -108,6 +129,22 @@ The status command prints the active logger level so you can confirm the `KRAKEN
 ### Optional Setup Script
 
 `python setup.py` performs version checks, installs requirements, seeds `.env`, and runs `kraken_cli.py --help`. Use it if you prefer an automated bootstrap.
+
+### Enabling Automated Trading Features
+
+The automated stack builds on core dependencies plus a few optional packages:
+
+- `pandas` and `schedule` ship in `requirements.txt` and are required for strategy evaluation and polling.
+- `pandas-ta` (pure Python) unlocks a wider indicator set with zero native extensions:
+  ```bash
+  pip install pandas-ta
+  ```
+- `TA-Lib` delivers faster indicators but needs native libraries. Install the system package first (for example, `brew install ta-lib` on macOS or `sudo apt install ta-lib` on Debian/Ubuntu), then:
+  ```bash
+  pip install TA-Lib
+  ```
+
+If neither TA-Lib nor pandas-ta is present the CLI falls back to built-in indicator math, so the engine still runs—just with less performance headroom.
 
 ## Configuration & Environment
 
