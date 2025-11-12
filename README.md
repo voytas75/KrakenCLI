@@ -278,6 +278,7 @@ python kraken_cli.py --help
 python kraken_cli.py status
 python kraken_cli.py orders
 python kraken_cli.py ticker -p ETHUSD
+./run_tests.sh  # runs comprehensive test plus targeted pytest suites
 ```
 
 Ensure commands that hit authenticated endpoints handle missing credentials gracefully when running in non-production environments.

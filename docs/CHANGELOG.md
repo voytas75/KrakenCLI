@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Introduce an automated diagnostics command for optional dependency and configuration checks.
 - Implement adaptive rate limiting tuned to Kraken's endpoint categories.
 
+### Changed
+- `run_tests.sh` now executes the comprehensive suite plus pytest coverage for rate limits, automation, and CLI behaviour.
+
 ## [0.9.7] - 2025-11-13
 
 ### Added
