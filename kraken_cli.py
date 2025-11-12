@@ -49,6 +49,9 @@ AUTO_CONTROL_DIR = Path("logs/auto_trading")
 RISK_STATE_FILE = AUTO_CONTROL_DIR / "risk_state.json"
 AUTO_STATUS_FILE = AUTO_CONTROL_DIR / "status.json"
 EXPORT_OUTPUT_DIR = Path("logs/exports")
+_MAX_RETRY_ATTEMPTS = 3
+_RETRY_INITIAL_DELAY = 1.0
+_RETRY_BACKOFF_FACTOR = 1.5
 
 TradingEngine: Any = None
 TradingEngineStatus: Any = None
@@ -82,8 +85,39 @@ def _convert_to_kraken_asset(currency_code: str) -> str:
         'LINK': 'LINK', # Chainlink (already in standard format)
         'SC': 'SC',     # Siacoin (already in standard format)
     }
-    
+
     return conversions.get(currency_code.upper(), currency_code.upper())
+
+
+def _call_with_retries(action, description: str) -> Any:
+    """Invoke the provided callable with exponential backoff retries."""
+
+    delay = _RETRY_INITIAL_DELAY
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
+        try:
+            return action()
+        except KeyboardInterrupt:  # pragma: no cover - user interruption
+            raise
+        except Exception as exc:  # pragma: no cover -> handled via tests for known paths
+            last_error = exc
+            logger.warning(
+                "%s attempt %d/%d failed: %s",
+                description,
+                attempt,
+                _MAX_RETRY_ATTEMPTS,
+                exc,
+            )
+            if attempt >= _MAX_RETRY_ATTEMPTS:
+                break
+            time.sleep(delay)
+            delay *= _RETRY_BACKOFF_FACTOR
+
+    if last_error:
+        raise last_error
+
+    return None
 
 
 def _extract_filename_from_headers(headers: Dict[str, Any], fallback: str) -> str:
@@ -104,6 +138,22 @@ def _extract_filename_from_headers(headers: Dict[str, Any], fallback: str) -> st
                 return filename
 
     return fallback
+
+
+def _log_export_headers(headers: Dict[str, Any]) -> None:
+    """Log a sanitized subset of export response headers for diagnostics."""
+
+    if not headers:
+        return
+
+    safe_keys = {"content-type", "content-length", "content-disposition"}
+    safe_headers = {
+        key: value
+        for key, value in headers.items()
+        if key.lower() in safe_keys
+    }
+    if safe_headers:
+        logger.info("Export response headers: %s", safe_headers)
 
 
 def _ensure_auto_modules() -> None:
@@ -953,7 +1003,10 @@ def withdraw(ctx, asset, key, amount, address, otp, method, start, status, confi
     if status:
         console.print("[bold blue]🔍 Fetching withdrawal status...[/bold blue]")
         try:
-            response = api_client.get_withdraw_status(asset=asset_code, method=method, start=start)
+            response = _call_with_retries(
+                lambda: api_client.get_withdraw_status(asset=asset_code, method=method, start=start),
+                "Withdrawal status fetch",
+            )
         except Exception as exc:
             console.print(f"[red]❌ Failed to fetch withdrawal status: {exc}[/red]")
             return
@@ -1034,12 +1087,15 @@ def withdraw(ctx, asset, key, amount, address, otp, method, start, status, confi
             return
 
     try:
-        response = api_client.request_withdrawal(
-            asset=asset_code,
-            key=key,
-            amount=str(amount_decimal),
-            address=address,
-            otp=otp,
+        response = _call_with_retries(
+            lambda: api_client.request_withdrawal(
+                asset=asset_code,
+                key=key,
+                amount=str(amount_decimal),
+                address=address,
+                otp=otp,
+            ),
+            "Withdrawal submission",
         )
     except Exception as exc:
         console.print(f"[red]❌ Withdrawal request failed: {exc}[/red]")
@@ -1116,7 +1172,10 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
     if status:
         console.print("[bold blue]🔍 Fetching export job status...[/bold blue]")
         try:
-            response = api_client.get_export_status(report=report)
+            response = _call_with_retries(
+                lambda: api_client.get_export_status(report=report),
+                "Export status fetch",
+            )
         except Exception as exc:
             console.print(f"[red]❌ Failed to fetch export status: {exc}[/red]")
             return
@@ -1155,7 +1214,10 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
     if retrieve_id:
         console.print(f"[bold blue]🔍 Retrieving export job {retrieve_id}...[/bold blue]")
         try:
-            content, headers = api_client.retrieve_export(report_id=retrieve_id)
+            content, headers = _call_with_retries(
+                lambda: api_client.retrieve_export(report_id=retrieve_id),
+                "Export retrieval",
+            )
         except Exception as exc:
             console.print(f"[red]❌ Failed to retrieve export: {exc}[/red]")
             return
@@ -1168,12 +1230,28 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
         filename = _extract_filename_from_headers(headers, fallback=f"{retrieve_id}.zip")
         output_path = EXPORT_OUTPUT_DIR / filename
 
+        _log_export_headers(headers)
+
         try:
             with output_path.open('wb') as handle:
                 handle.write(content)
         except OSError as exc:  # pragma: no cover - filesystem guard
             console.print(f"[red]❌ Failed to write export file: {exc}[/red]")
             return
+
+        expected_length = (headers.get('Content-Length') if headers else None) or (headers.get('content-length') if headers else None)
+        if expected_length:
+            try:
+                expected_bytes = int(expected_length)
+                if expected_bytes != len(content):
+                    logger.warning(
+                        "Export size mismatch (expected=%s, actual=%s)",
+                        expected_bytes,
+                        len(content),
+                    )
+                    console.print("[yellow]⚠️  Download size differs from Content-Length; verify archive integrity.[/yellow]")
+            except ValueError:
+                logger.debug("Unable to parse Content-Length header: %s", expected_length)
 
         console.print(f"[green]✅ Export saved to [bold]{output_path}[/bold].[/green]")
         console.print("[yellow]💡 Extract the archive to review the exported data.[/yellow]")
@@ -1182,7 +1260,10 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
     if delete_id:
         console.print(f"[bold yellow]⚠️  Deleting export job {delete_id}...[/bold yellow]")
         try:
-            response = api_client.delete_export(report_id=delete_id)
+            response = _call_with_retries(
+                lambda: api_client.delete_export(report_id=delete_id),
+                "Export delete",
+            )
         except Exception as exc:
             console.print(f"[red]❌ Failed to delete export: {exc}[/red]")
             return
@@ -1225,13 +1306,16 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
             return
 
     try:
-        response = api_client.request_export(
-            report=report,
-            description=job_description,
-            export_format=export_format.upper(),
-            fields=list(fields) if fields else None,
-            start=start,
-            end=end,
+        response = _call_with_retries(
+            lambda: api_client.request_export(
+                report=report,
+                description=job_description,
+                export_format=export_format.upper(),
+                fields=list(fields) if fields else None,
+                start=start,
+                end=end,
+            ),
+            "Export submission",
         )
     except Exception as exc:
         console.print(f"[red]❌ Failed to submit export job: {exc}[/red]")

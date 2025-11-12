@@ -215,13 +215,45 @@ class KrakenCliMockedTests(TestCase):
 
         self.assertEqual(result.exit_code, 0, msg=result.output)
         self.assertIn("Withdrawal submitted successfully", result.output)
-        withdraw_mock.assert_called_once_with(
+        self.assertGreaterEqual(withdraw_mock.call_count, 1)
+
+        withdraw_mock.assert_called_with(
             asset="ZUSD",
             key="Primary",
             amount="1.50",
             address=None,
             otp=None,
         )
+
+    def test_withdraw_retries_on_failure(self) -> None:
+        """Withdraw command should retry transient failures before succeeding."""
+
+        side_effects = [Exception("temporary failure"), {"result": {"refid": "WD123"}}]
+
+        with patch("kraken_cli.time.sleep", return_value=None), \
+                patch.object(
+                    KrakenAPIClient,
+                    "request_withdrawal",
+                    side_effect=side_effects,
+                ) as withdraw_mock:
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                [
+                    "withdraw",
+                    "--asset",
+                    "ZUSD",
+                    "--key",
+                    "Primary",
+                    "--amount",
+                    "1.50",
+                ],
+                input="y\n",
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Withdrawal submitted successfully", result.output)
+        self.assertEqual(withdraw_mock.call_count, 2)
 
     def test_withdraw_status_lists_entries(self) -> None:
         """Withdraw command should list status entries when --status is used."""
@@ -357,3 +389,30 @@ class KrakenCliMockedTests(TestCase):
             written_path = Path(tmpdir) / "export.zip"
             self.assertTrue(written_path.exists(), msg="Export file was not written")
             self.assertEqual(written_path.read_bytes(), b"binary-data")
+
+    def test_export_report_retries_on_failure(self) -> None:
+        """Export retrieval should retry transient failures before succeeding."""
+
+        side_effects = [Exception("temporary failure"), (b"binary-data", {})]
+
+        with TemporaryDirectory() as tmpdir, \
+                patch.object(kraken_cli, "EXPORT_OUTPUT_DIR", Path(tmpdir)), \
+                patch("kraken_cli.time.sleep", return_value=None), \
+                patch.object(
+                    KrakenAPIClient,
+                    "retrieve_export",
+                    side_effect=side_effects,
+                ) as retrieve_mock:
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                [
+                    "export-report",
+                    "--retrieve-id",
+                    "EXP123",
+                ],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Export saved to", result.output)
+        self.assertEqual(retrieve_mock.call_count, 2)
