@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich import print as rprint
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 import logging
 
@@ -89,30 +90,46 @@ def _convert_to_kraken_asset(currency_code: str) -> str:
     return conversions.get(currency_code.upper(), currency_code.upper())
 
 
-def _call_with_retries(action, description: str) -> Any:
-    """Invoke the provided callable with exponential backoff retries."""
+def _call_with_retries(action, description: str, display_label: Optional[str] = None) -> Any:
+    """Invoke the provided callable with exponential backoff and Rich progress."""
 
     delay = _RETRY_INITIAL_DELAY
     last_error: Optional[Exception] = None
+    display_label = display_label or description
 
-    for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
-        try:
-            return action()
-        except KeyboardInterrupt:  # pragma: no cover - user interruption
-            raise
-        except Exception as exc:  # pragma: no cover -> handled via tests for known paths
-            last_error = exc
-            logger.warning(
-                "%s attempt %d/%d failed: %s",
-                description,
-                attempt,
-                _MAX_RETRY_ATTEMPTS,
-                exc,
-            )
-            if attempt >= _MAX_RETRY_ATTEMPTS:
-                break
-            time.sleep(delay)
-            delay *= _RETRY_BACKOFF_FACTOR
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}"),
+        transient=True,
+        console=console,
+    )
+
+    with progress:
+        task_id = progress.add_task(f"{display_label}…", start=False)
+        for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
+            progress.update(task_id, description=f"{display_label} (attempt {attempt}/{_MAX_RETRY_ATTEMPTS})")
+            progress.start_task(task_id)
+            try:
+                result = action()
+                progress.update(task_id, description=f"{display_label} (completed)")
+                return result
+            except KeyboardInterrupt:  # pragma: no cover - user interruption
+                progress.stop_task(task_id)
+                raise
+            except Exception as exc:
+                last_error = exc
+                progress.update(task_id, description=f"{display_label} failed: {exc}")
+                logger.warning(
+                    "%s attempt %d/%d failed: %s",
+                    description,
+                    attempt,
+                    _MAX_RETRY_ATTEMPTS,
+                    exc,
+                )
+                if attempt >= _MAX_RETRY_ATTEMPTS:
+                    break
+                time.sleep(delay)
+                delay *= _RETRY_BACKOFF_FACTOR
 
     if last_error:
         raise last_error
@@ -1006,6 +1023,7 @@ def withdraw(ctx, asset, key, amount, address, otp, method, start, status, confi
             response = _call_with_retries(
                 lambda: api_client.get_withdraw_status(asset=asset_code, method=method, start=start),
                 "Withdrawal status fetch",
+                display_label="⏳ Fetching withdrawal status",
             )
         except Exception as exc:
             console.print(f"[red]❌ Failed to fetch withdrawal status: {exc}[/red]")
@@ -1096,6 +1114,7 @@ def withdraw(ctx, asset, key, amount, address, otp, method, start, status, confi
                 otp=otp,
             ),
             "Withdrawal submission",
+            display_label="⏳ Submitting withdrawal",
         )
     except Exception as exc:
         console.print(f"[red]❌ Withdrawal request failed: {exc}[/red]")
@@ -1175,6 +1194,7 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
             response = _call_with_retries(
                 lambda: api_client.get_export_status(report=report),
                 "Export status fetch",
+                display_label="⏳ Fetching export status",
             )
         except Exception as exc:
             console.print(f"[red]❌ Failed to fetch export status: {exc}[/red]")
@@ -1217,6 +1237,7 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
             content, headers = _call_with_retries(
                 lambda: api_client.retrieve_export(report_id=retrieve_id),
                 "Export retrieval",
+                display_label="⏳ Downloading export",
             )
         except Exception as exc:
             console.print(f"[red]❌ Failed to retrieve export: {exc}[/red]")
@@ -1263,6 +1284,7 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
             response = _call_with_retries(
                 lambda: api_client.delete_export(report_id=delete_id),
                 "Export delete",
+                display_label="⏳ Deleting export job",
             )
         except Exception as exc:
             console.print(f"[red]❌ Failed to delete export: {exc}[/red]")
@@ -1316,6 +1338,7 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
                 end=end,
             ),
             "Export submission",
+            display_label="⏳ Submitting export job",
         )
     except Exception as exc:
         console.print(f"[red]❌ Failed to submit export job: {exc}[/red]")
