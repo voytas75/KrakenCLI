@@ -3,7 +3,6 @@
 If you can, please support me by [![Kraken](https://img.shields.io/badge/Kraken.com-earn_20_USDG-2824B6)](https://proinvite.kraken.com/9f1e/hqsollz2)
 (unlock 20 USDG after signing up and trade with the code `bz9fds3s`). Thx!
 
-
 Professional-grade command-line tooling for the Kraken cryptocurrency exchange. The CLI covers connectivity checks, market data, portfolio insights, and order execution with rich terminal feedback and comprehensive logging.
 
 ## Safety Notice
