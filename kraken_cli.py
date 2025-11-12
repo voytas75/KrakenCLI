@@ -57,10 +57,11 @@ AUTO_CONTROL_DIR = Path("logs/auto_trading")
 RISK_STATE_FILE = AUTO_CONTROL_DIR / "risk_state.json"
 AUTO_STATUS_FILE = AUTO_CONTROL_DIR / "status.json"
 
-_OPTIONAL_DEPENDENCIES: Tuple[Tuple[str, str], ...] = (
-    ("pandas", "Required for automated trading engine and indicator calculations."),
-    ("pandas_ta", "Extends indicator coverage (optional)."),
-    ("talib", "Native TA-Lib acceleration (optional)."),
+_OPTIONAL_DEPENDENCIES: Tuple[Tuple[str, str, str], ...] = (
+    ("pandas", "Required for automated trading engine and indicator calculations.", "pip install pandas"),
+    ("pandas_ta", "Extends indicator coverage (optional).", "pip install pandas-ta"),
+    ("talib", "Native TA-Lib acceleration (optional).", "pip install TA-Lib"),
+    ("ta-lib", "Native TA-Lib acceleration (alias).", "pip install TA-Lib"),
 )
 
 
@@ -127,14 +128,69 @@ def _render_diagnostics(console: Console, config_obj: Config) -> None:
     deps_table.add_column("Module", style="magenta")
     deps_table.add_column("Status", style="green")
     deps_table.add_column("Notes", style="white")
+    deps_table.add_column("Install Hint", style="yellow")
 
-    for module_name, description in _OPTIONAL_DEPENDENCIES:
+    for module_name, description, hint in _OPTIONAL_DEPENDENCIES:
         available, error = _dependency_status(module_name)
         status = "✅ Available" if available else "⚠️ Missing"
-        note = description if available else (error or description)
-        deps_table.add_row(module_name, status, note)
+        note = description if available else (error or description or description)
+        install_hint = "-" if available else hint
+        deps_table.add_row(module_name, status, note, install_hint)
 
     console.print(deps_table)
+
+    missing_env_keys: List[str] = []
+    required_vars = ["KRAKEN_API_KEY", "KRAKEN_API_SECRET"]
+    optional_vars = [
+        "KRAKEN_API_BASE_URL",
+        "KRAKEN_PUBLIC_RATE_LIMIT",
+        "KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN",
+    ]
+    for key in required_vars:
+        if not os.getenv(key):
+            missing_env_keys.append(key)
+
+    env_detail_lines: List[str] = []
+    if missing_env_keys:
+        env_detail_lines.append(
+            f"• Missing critical environment variables: {', '.join(missing_env_keys)}"
+        )
+    else:
+        env_detail_lines.append("• Required environment variables detected.")
+
+    for key in optional_vars:
+        if not os.getenv(key):
+            env_detail_lines.append(f"• Optional tuning variable unset: {key}")
+
+    export_dir_exists = EXPORT_OUTPUT_DIR.exists()
+    export_dir_writable = False
+    if export_dir_exists:
+        try:
+            test_file = EXPORT_OUTPUT_DIR / ".write_test"
+            with test_file.open("w") as handle:
+                handle.write("ok")
+            test_file.unlink()
+            export_dir_writable = True
+        except OSError:
+            export_dir_writable = False
+
+    env_detail_lines.append(
+        f"• Export directory: {EXPORT_OUTPUT_DIR} "
+        f"({'writable' if export_dir_writable else 'create pending' if not export_dir_exists else 'not writable'})"
+    )
+
+    if not config_obj.is_sandbox():
+        env_detail_lines.append(
+            "• Sandbox disabled: enable dry-run or set KRAKEN_SANDBOX=true when testing."
+        )
+
+    console.print(
+        Panel.fit(
+            "\n".join(env_detail_lines),
+            title="Environment Checks",
+            border_style="blue",
+        )
+    )
 
     guidance = Panel.fit(
         "\n".join(
