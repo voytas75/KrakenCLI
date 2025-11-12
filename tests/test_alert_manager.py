@@ -57,6 +57,7 @@ class AlertManagerTests(unittest.TestCase):
 
         persisted = json.loads(self.state_path.read_text(encoding="utf-8"))
         self.assertFalse(persisted["enabled"])
+        self.assertIsInstance(persisted.get("history"), list)
 
     def test_send_emits_console_output_when_enabled(self) -> None:
         config = _StubConfig(enabled=True, recipients=["alerts@example.com"])
@@ -79,6 +80,8 @@ class AlertManagerTests(unittest.TestCase):
         rendered = console.export_text()
         self.assertIn("Test alert message", rendered)
         self.assertIn("risk.test", rendered)
+        summary = manager.status()
+        self.assertEqual(len(summary["recent_alerts"]), 1)
 
     def test_status_reports_channels(self) -> None:
         config = _StubConfig(enabled=True, webhook="https://example.com", recipients=["ops@example.com"])

@@ -67,6 +67,18 @@ class AlertManager:
         self._throttle_seconds = max(0.0, throttle_seconds)
         self._last_sent: Dict[str, float] = {}
         self._history: Deque[AlertPayload] = deque(maxlen=20)
+        for entry in self._state.get("history", []):
+            try:
+                payload = AlertPayload(
+                    event=str(entry["event"]),
+                    message=str(entry["message"]),
+                    severity=str(entry["severity"]),
+                    details=dict(entry.get("details") or {}),
+                    timestamp=float(entry["timestamp"]),
+                )
+                self._history.append(payload)
+            except (KeyError, TypeError, ValueError):
+                continue
 
         default_enabled = False
         try:
@@ -101,7 +113,23 @@ class AlertManager:
     def _persist_state(self) -> None:
         try:
             with self._state_path.open("w", encoding="utf-8") as handle:
-                json.dump({"enabled": self._enabled}, handle, indent=2)
+                json.dump(
+                    {
+                        "enabled": self._enabled,
+                        "history": [
+                            {
+                                "event": payload.event,
+                                "message": payload.message,
+                                "severity": payload.severity,
+                                "details": payload.details,
+                                "timestamp": payload.timestamp,
+                            }
+                            for payload in self._history
+                        ],
+                    },
+                    handle,
+                    indent=2,
+                )
         except OSError as exc:
             logger.error("Unable to persist alert state (%s): %s", self._state_path, exc)
 
@@ -187,6 +215,7 @@ class AlertManager:
         self._history.append(payload)
         self._log_payload(payload)
         self._print_payload(payload)
+        self._persist_state()
 
     def _should_emit(self, event: str, cooldown: Optional[float]) -> bool:
         effective_cooldown = self._throttle_seconds if cooldown is None else max(0.0, cooldown)
