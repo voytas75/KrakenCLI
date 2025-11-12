@@ -1,6 +1,10 @@
 """
-Logging configuration for Kraken CLI
+Logging configuration for Kraken CLI.
+
+Updates: v0.9.2 - 2025-11-12 - Harden console logging for limited encodings.
 """
+
+from __future__ import annotations
 
 import logging
 import sys
@@ -8,11 +12,38 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 
+class EncodingSafeStreamHandler(logging.StreamHandler):
+    """Stream handler that tolerates consoles without full Unicode support."""
+
+    def emit(self, record: logging.LogRecord) -> None:  # type: ignore[override]
+        stream = self.stream
+        if stream is None:
+            return
+
+        msg = self.format(record)
+
+        try:
+            stream.write(msg + self.terminator)
+        except UnicodeEncodeError:
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+            safe_message = msg.encode(encoding, errors="replace").decode(encoding, errors="replace")
+            try:
+                stream.write(safe_message + self.terminator)
+            except Exception:
+                self.handleError(record)
+                return
+        except Exception:
+            self.handleError(record)
+            return
+
+        self.flush()
+
+
 def setup_logging(log_level: str = "INFO",
                   log_file: str = "kraken_cli.log",
                   max_bytes: int = 10 * 1024 * 1024,  # 10MB
                   backup_count: int = 5) -> None:
-    """Setup logging configuration"""
+    """Setup logging configuration and ensure safe Unicode output."""
 
     normalized_level = log_level.upper() if isinstance(log_level, str) else "INFO"
     if normalized_level not in logging._nameToLevel:
@@ -38,13 +69,14 @@ def setup_logging(log_level: str = "INFO",
     file_handler = RotatingFileHandler(
         log_dir / log_file,
         maxBytes=max_bytes,
-        backupCount=backup_count
+        backupCount=backup_count,
+        encoding="utf-8"
     )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
     
     # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler: logging.Handler = EncodingSafeStreamHandler(sys.stdout)
     console_handler.setLevel(logging._nameToLevel[normalized_level])
     console_handler.setFormatter(formatter)
     
