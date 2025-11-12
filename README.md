@@ -246,6 +246,10 @@ Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and 
 - Root logger honours `KRAKEN_LOG_LEVEL`; invalid values fall back to `INFO`.
 - Outgoing API calls and errors are logged without leaking sensitive data.
 - The current log level is displayed in CLI output (`status` command and application info panel) to confirm runtime configuration quickly.
+- Alert lifecycle:
+  - `python kraken_cli.py risk-alerts --enable` toggles notifications on and persists the choice to `logs/alert_state.json`.
+  - Disable alerts with `python kraken_cli.py risk-alerts --disable`; delete `logs/alert_state.json` to reset to config defaults.
+  - When alerts fire you will see Rich console messages (e.g., `⚠️ Alert (risk.decision_rejected) …`) along with log entries in `kraken_cli.log` tagged as `[WARNING]` or `[ERROR]`.
 
 ## Testing & Quality Assurance
 
