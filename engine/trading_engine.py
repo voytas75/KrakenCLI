@@ -4,6 +4,7 @@ Automated trading engine coordinating strategies, risk, and trade execution.
 Updates:
     v0.9.0 - 2025-11-11 - Added polling engine with persistent status reporting.
     v0.9.2 - 2025-11-12 - Integrated risk-based protective orders and realised PnL tracking.
+    v0.9.3 - 2025-11-12 - Wired alert manager notifications into engine lifecycle.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -24,6 +25,9 @@ from risk import RiskDecision, RiskManager
 from strategies.base_strategy import StrategyContext, StrategySignal
 from strategies.strategy_manager import StrategyManager
 from trading.trader import Trader
+
+if TYPE_CHECKING:
+    from alerts.alert_manager import AlertManager
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +117,7 @@ class TradingEngine:
         control_dir: Path,
         poll_interval: int = 300,
         rate_limit: float = 1.0,
+        alert_manager: Optional["AlertManager"] = None,
     ):
         self.trader = trader
         self.portfolio_manager = portfolio_manager
@@ -120,6 +125,7 @@ class TradingEngine:
         self.risk_manager = risk_manager
         self.poll_interval = poll_interval
         self.rate_delay = 1.0 / max(rate_limit, 0.1)
+        self.alert_manager = alert_manager
 
         self.control_dir = control_dir
         self.control_dir.mkdir(parents=True, exist_ok=True)
@@ -176,6 +182,12 @@ class TradingEngine:
                 except Exception as exc:  # pragma: no cover - protective guard
                     logger.exception("Trading engine cycle failed: %s", exc)
                     self._status.last_error = str(exc)
+                    self._send_alert(
+                        event="engine.error",
+                        message=f"Trading engine cycle failed: {exc}",
+                        severity="ERROR",
+                        details={"cycle": cycle_count},
+                    )
                 finally:
                     self._persist_status()
 
@@ -234,6 +246,16 @@ class TradingEngine:
                     decision = self.risk_manager.evaluate_signal(signal, context)
                     if not decision.approved:
                         logger.info("⚠️  Signal skipped: %s (%s)", signal.reason, decision.reason)
+                        self._send_alert(
+                            event="risk.decision_rejected",
+                            message=f"{pair}: {decision.reason}",
+                            severity="WARNING",
+                            details={
+                                "pair": pair,
+                                "strategy": strategy.name,
+                                "confidence": f"{signal.confidence:.2f}",
+                            },
+                        )
                         continue
 
                     if dry_run:
@@ -247,6 +269,13 @@ class TradingEngine:
                         realised = self.risk_manager.record_execution(pair, decision, context)
                         if realised != 0.0:
                             logger.info("📈 Dry-run realised PnL for %s: %.2f", pair, realised)
+                            if realised < 0:
+                                self._send_alert(
+                                    event="risk.dry_run_loss",
+                                    message=f"Dry-run loss recorded for {pair}: {realised:.2f}",
+                                    severity="INFO",
+                                    details={"pair": pair, "strategy": strategy.name},
+                                )
                         continue
 
                     success = self._execute_order(pair, signal, decision)
@@ -254,6 +283,13 @@ class TradingEngine:
                         realised = self.risk_manager.record_execution(pair, decision, context)
                         if realised != 0.0:
                             logger.info("📊 Realised PnL recorded for %s: %.2f", pair, realised)
+                            if realised < 0:
+                                self._send_alert(
+                                    event="risk.realised_loss",
+                                    message=f"Realised loss recorded for {pair}: {realised:.2f}",
+                                    severity="WARNING",
+                                    details={"pair": pair, "strategy": strategy.name},
+                                )
                     time.sleep(self.rate_delay)
 
                 time.sleep(self.rate_delay)
@@ -548,3 +584,16 @@ class TradingEngine:
             except (json.JSONDecodeError, OSError) as exc:
                 logger.error("Failed to read engine status: %s", exc)
         return self._status
+
+    def _send_alert(
+        self,
+        event: str,
+        message: str,
+        *,
+        severity: str = "INFO",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Helper to forward alerts to the configured manager when available."""
+        if self.alert_manager is None:
+            return
+        self.alert_manager.send(event=event, message=message, severity=severity, details=details)

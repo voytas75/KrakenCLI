@@ -158,6 +158,22 @@ class StubRiskManager:
         return 0.0
 
 
+class RecordingAlertManager:
+    """Collects alert payloads for verification during tests."""
+
+    def __init__(self) -> None:
+        self.records: List[tuple[str, str, str, Dict[str, Any]]] = []
+
+    def send(
+        self,
+        event: str,
+        message: str,
+        severity: str = "INFO",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.records.append((event, message, severity, details or {}))
+
+
 class DummyEngine:
     """Engine stub capturing run_forever invocations for CLI tests."""
 
@@ -201,6 +217,7 @@ class TradingEngineHarnessTests(unittest.TestCase):
         decision: RiskDecision,
         *,
         signals: Optional[Sequence[StrategySignal]] = None,
+        alert_manager: Optional[Any] = None,
     ) -> tuple[TradingEngine, StubTrader, StubRiskManager, DummyApiClient]:
         api_client = DummyApiClient(self.ohlc_payload)
         trader = StubTrader(api_client)
@@ -217,6 +234,7 @@ class TradingEngineHarnessTests(unittest.TestCase):
             control_dir=control_dir,
             poll_interval=60,
             rate_limit=100.0,
+            alert_manager=alert_manager,
         )
         return engine, trader, risk_manager, api_client
 
@@ -271,6 +289,35 @@ class TradingEngineHarnessTests(unittest.TestCase):
         self.assertFalse(order["validate"])
         self.assertAlmostEqual(order["volume"], decision.volume)
         self.assertEqual(len(risk_manager.record_calls), 1)
+
+    def test_run_once_emits_alert_when_decision_rejected(self) -> None:
+        decision = RiskDecision(
+            False,
+            "Daily trade limit reached.",
+            volume=None,
+            position_fraction=0.0,
+            direction="flat",
+            entry_price=None,
+            stop_loss_price=None,
+            take_profit_price=None,
+            closing_position=False,
+        )
+        alert_recorder = RecordingAlertManager()
+        engine, trader, risk_manager, api_client = self._build_engine(
+            decision,
+            alert_manager=alert_recorder,
+        )
+
+        with mock.patch("time.sleep", return_value=None):
+            processed = engine.run_once(dry_run=True)
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(len(alert_recorder.records), 1)
+        event, message, severity, details = alert_recorder.records[0]
+        self.assertEqual(event, "risk.decision_rejected")
+        self.assertEqual(severity, "WARNING")
+        self.assertIn("Daily trade limit", message)
+        self.assertEqual(details.get("pair"), "ETHUSD")
 
 
 class RiskManagerEvaluationTests(unittest.TestCase):

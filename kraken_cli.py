@@ -4,6 +4,7 @@ Kraken Pro Trading CLI Application
 Professional cryptocurrency trading interface for Kraken exchange
 
 Updates: v0.9.0 - 2025-11-11 - Added automated trading engine commands and integrations.
+Updates: v0.9.3 - 2025-11-12 - Added risk alert management commands and logging integration.
 """
 
 import click
@@ -24,6 +25,7 @@ import logging
 # Add current directory to path for imports
 sys.path.append(str(Path(__file__).parent))
 
+from alerts import AlertManager
 from config import Config
 from api.kraken_client import KrakenAPIClient
 from trading.trader import Trader
@@ -36,6 +38,7 @@ load_dotenv()
 
 console = Console()
 config = Config()
+logger = logging.getLogger(__name__)
 
 # Setup logging
 setup_logging(log_level=config.log_level)
@@ -121,6 +124,7 @@ def cli(ctx):
     """Kraken Pro Trading CLI - Professional cryptocurrency trading interface"""
     ctx.ensure_object(dict)
     ctx.obj['config'] = config
+    ctx.obj['alerts'] = AlertManager(config=config, console=console)
     
     # Initialize API client if credentials are available
     if config.has_credentials():
@@ -172,6 +176,7 @@ def _create_trading_engine(ctx, poll_interval: int):
     trader: Trader = ctx.obj.get('trader')
     portfolio: PortfolioManager = ctx.obj.get('portfolio')
     config_obj: Config = ctx.obj.get('config', config)
+    alert_manager: Optional[AlertManager] = ctx.obj.get('alerts')
 
     if trader is None or portfolio is None:
         console.print("[red]❌ Automated trading requires authenticated trader access.[/red]")
@@ -192,6 +197,7 @@ def _create_trading_engine(ctx, poll_interval: int):
         control_dir=AUTO_CONTROL_DIR,
         poll_interval=poll_interval,
         rate_limit=config_obj.get_rate_limit(),
+        alert_manager=alert_manager,
     )
     return engine
 
@@ -1201,6 +1207,49 @@ def auto_status() -> None:
         table.add_row("Last Error", payload.get("last_error") or "None")
 
     console.print(table)
+
+
+@cli.command("risk-alerts")
+@click.option("--enable", is_flag=True, help="Enable alert notifications and persist the preference.")
+@click.option("--disable", is_flag=True, help="Disable alert notifications until re-enabled.")
+@click.option("--status", is_flag=True, help="Display current alert configuration status.")
+@click.pass_context
+def risk_alerts(ctx, enable: bool, disable: bool, status: bool) -> None:
+    """Manage alert enablement and inspect configured channels."""
+    alert_manager: Optional[AlertManager] = ctx.obj.get('alerts')
+    if alert_manager is None:
+        console.print("[red]❌ Alert manager unavailable; initialise configuration first.[/red]")
+        return
+
+    actions_selected = sum(1 for flag in (enable, disable, status) if flag)
+    if actions_selected > 1:
+        console.print("[red]❌ Choose only one flag: --enable, --disable, or --status.[/red]")
+        return
+
+    if enable:
+        alert_manager.enable(source="cli")
+        console.print("[green]✅ Alerts enabled.[/green]")
+        status = True
+    elif disable:
+        alert_manager.disable(source="cli")
+        console.print("[yellow]⚠️  Alerts disabled.[/yellow]")
+        status = True
+    else:
+        status = True
+
+    if status:
+        summary = alert_manager.status()
+        table = Table(title="Alert Status", expand=False)
+        table.add_column("Setting", style="cyan")
+        table.add_column("Value", style="green")
+
+        table.add_row("Enabled", "✅" if summary["enabled"] else "❌")
+        channels = summary.get("channels", {})
+        for name, active in channels.items():
+            table.add_row(f"Channel: {name}", "✅" if active else "❌")
+        table.add_row("State File", summary.get("state_path", "N/A"))
+        console.print(table)
+        logger.info("Alert status inspected (enabled=%s, channels=%s)", summary["enabled"], channels)
 
 
 @cli.command()
