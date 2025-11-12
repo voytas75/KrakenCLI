@@ -293,21 +293,47 @@ For deeper debugging, add `--verbose` (where available), rerun commands, and ins
 
 ```
 KrakenCLI/
-├── kraken_cli.py            # Main Click command group
-├── config.py                # Configuration loader and precedence handler
+├── README.md
+├── kraken_cli.py
+├── config.py
+├── requirements.txt
+├── setup.py
+├── alerts/
+│   └── alert_manager.py
 ├── api/
-│   └── kraken_client.py     # REST API integration and signing
+│   └── kraken_client.py
+├── cli/
+│   ├── automation.py
+│   ├── export.py
+│   ├── portfolio.py
+│   └── trading.py
+├── configs/
+│   ├── auto_trading.yaml
+│   └── backtests/
+├── engine/
+│   └── trading_engine.py
+├── indicators/
+│   └── technical_indicators.py
 ├── portfolio/
-│   └── portfolio_manager.py # Portfolio aggregation logic
+│   └── portfolio_manager.py
+├── risk/
+│   └── risk_manager.py
+├── strategies/
+│   ├── base_strategy.py
+│   ├── ma_crossover_strategy.py
+│   ├── macd_strategy.py
+│   ├── rsi_strategy.py
+│   └── strategy_manager.py
 ├── trading/
-│   └── trader.py            # Order validation and submission
+│   └── trader.py
 ├── utils/
-│   ├── helpers.py           # Formatting utilities
-│   └── logger.py            # Logging bootstrap
-├── tests/                   # CLI regression scripts
-├── requirements.txt         # Python dependencies
-├── setup.py                 # Optional bootstrap helper
-└── logs/                    # Rotating log outputs (generated at runtime)
+│   ├── helpers.py
+│   └── logger.py
+└── tests/
+    ├── comprehensive_test.py
+    ├── test_alert_manager.py
+    ├── test_cli_mocked.py
+    └── ...
 ```
 
 ## Development Guidelines
