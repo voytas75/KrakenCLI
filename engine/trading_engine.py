@@ -1,7 +1,9 @@
 """
 Automated trading engine coordinating strategies, risk, and trade execution.
 
-Updates: v0.9.0 - 2025-11-11 - Added polling engine with persistent status reporting.
+Updates:
+    v0.9.0 - 2025-11-11 - Added polling engine with persistent status reporting.
+    v0.9.2 - 2025-11-12 - Integrated risk-based protective orders and realised PnL tracking.
 """
 
 from __future__ import annotations
@@ -231,10 +233,16 @@ class TradingEngine:
                             decision.volume or 0.0,
                             signal.confidence,
                         )
-                        self.risk_manager.record_execution(pair)
+                        realised = self.risk_manager.record_execution(pair, decision, context)
+                        if realised != 0.0:
+                            logger.info("📈 Dry-run realised PnL for %s: %.2f", pair, realised)
                         continue
 
-                    self._execute_order(pair, signal, decision)
+                    success = self._execute_order(pair, signal, decision)
+                    if success:
+                        realised = self.risk_manager.record_execution(pair, decision, context)
+                        if realised != 0.0:
+                            logger.info("📊 Realised PnL recorded for %s: %.2f", pair, realised)
                     time.sleep(self.rate_delay)
 
                 time.sleep(self.rate_delay)
@@ -247,11 +255,16 @@ class TradingEngine:
         self._stop_event.set()
         self._persist_stop_flag()
 
-    def _execute_order(self, pair: str, signal: StrategySignal, decision: RiskDecision) -> None:
+    def _execute_order(
+        self,
+        pair: str,
+        signal: StrategySignal,
+        decision: RiskDecision,
+    ) -> bool:
         volume = decision.volume
         if volume is None or volume <= 0:
             logger.warning("Calculated order volume invalid; skipping order for %s.", pair)
-            return
+            return False
 
         try:
             result = self.trader.place_order(
@@ -261,10 +274,57 @@ class TradingEngine:
                 volume=volume,
                 validate=False,
             )
+            if not result:
+                logger.error("Order placement returned no result for %s.", pair)
+                return False
+
             logger.info("✅ Order placed for %s: %s", pair, result)
-            self.risk_manager.record_execution(pair)
+
+            if not decision.closing_position:
+                self._place_protective_orders(pair, signal, decision, volume)
+
+            return True
         except Exception as exc:
             logger.error("Failed to place order for %s: %s", pair, exc)
+            return False
+
+    def _place_protective_orders(
+        self,
+        pair: str,
+        signal: StrategySignal,
+        decision: RiskDecision,
+        volume: float,
+    ) -> None:
+        """Submit stop-loss and take-profit orders when configured."""
+        protective_type = "sell" if signal.action == "buy" else "buy"
+
+        if decision.stop_loss_price:
+            try:
+                self.trader.place_order(
+                    pair=pair,
+                    type=protective_type,
+                    ordertype="stop-loss",
+                    volume=volume,
+                    price=decision.stop_loss_price,
+                    validate=False,
+                )
+                logger.info("🛡️  Stop loss submitted for %s at %.4f", pair, decision.stop_loss_price)
+            except Exception as exc:
+                logger.error("Failed to place stop loss for %s: %s", pair, exc)
+
+        if decision.take_profit_price:
+            try:
+                self.trader.place_order(
+                    pair=pair,
+                    type=protective_type,
+                    ordertype="take-profit",
+                    volume=volume,
+                    price=decision.take_profit_price,
+                    validate=False,
+                )
+                logger.info("🎯 Take profit submitted for %s at %.4f", pair, decision.take_profit_price)
+            except Exception as exc:
+                logger.error("Failed to place take profit for %s: %s", pair, exc)
 
     def _select_strategies(self, strategy_keys: Optional[Sequence[str]]) -> List[Any]:
         if strategy_keys:

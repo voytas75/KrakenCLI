@@ -1,7 +1,9 @@
 """
 Risk management controls for automated trading.
 
-Updates: v0.9.0 - 2025-11-11 - Implemented baseline daily limits and position sizing rules.
+Updates:
+    v0.9.0 - 2025-11-11 - Implemented baseline daily limits and position sizing rules.
+    v0.9.2 - 2025-11-12 - Added stop loss/take profit handling, realised PnL tracking, and drawdown enforcement.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from strategies.base_strategy import StrategyContext, StrategySignal
 
@@ -26,6 +28,11 @@ class RiskDecision:
     reason: str
     volume: Optional[float] = None
     position_fraction: float = 0.0
+    direction: str = "flat"
+    entry_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
+    take_profit_price: Optional[float] = None
+    closing_position: bool = False
 
 
 @dataclass(slots=True)
@@ -37,13 +44,41 @@ class _TradeHistory:
 
 
 @dataclass(slots=True)
+class _PositionState:
+    """Internal representation of an open position for PnL tracking."""
+
+    direction: str
+    entry_price: float
+    volume: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise the open position for persistence."""
+        return {
+            "direction": self.direction,
+            "entry_price": self.entry_price,
+            "volume": self.volume,
+        }
+
+    @staticmethod
+    def from_dict(payload: Dict[str, Any]) -> "_PositionState":
+        """Restore an open position from persisted payload."""
+        return _PositionState(
+            direction=str(payload.get("direction", "flat")),
+            entry_price=float(payload.get("entry_price", 0.0)),
+            volume=float(payload.get("volume", 0.0)),
+        )
+
+
+@dataclass(slots=True)
 class _RiskState:
     """Persisted risk state for daily limits."""
 
     as_of: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     daily_loss: float = 0.0
+    daily_realised_pnl: float = 0.0
     daily_trades: int = 0
     history_by_pair: Dict[str, _TradeHistory] = field(default_factory=dict)
+    positions: Dict[str, _PositionState] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialise state for disk persistence."""
@@ -53,11 +88,14 @@ class _RiskState:
                 "last_trade_at": history.last_trade_at.isoformat() if history.last_trade_at else None,
                 "trades_today": history.trades_today,
             }
+
         return {
             "as_of": self.as_of.isoformat(),
             "daily_loss": self.daily_loss,
+            "daily_realised_pnl": self.daily_realised_pnl,
             "daily_trades": self.daily_trades,
             "history_by_pair": serialised_history,
+            "positions": {pair: position.to_dict() for pair, position in self.positions.items()},
         }
 
     @staticmethod
@@ -67,6 +105,7 @@ class _RiskState:
         if payload.get("as_of"):
             state.as_of = datetime.fromisoformat(payload["as_of"])
         state.daily_loss = float(payload.get("daily_loss", 0.0))
+        state.daily_realised_pnl = float(payload.get("daily_realised_pnl", 0.0))
         state.daily_trades = int(payload.get("daily_trades", 0))
 
         history: Dict[str, Any] = payload.get("history_by_pair", {})
@@ -78,6 +117,14 @@ class _RiskState:
                 last_trade_at=last_trade_at,
                 trades_today=int(entry.get("trades_today", 0)),
             )
+
+        positions_payload: Dict[str, Any] = payload.get("positions", {})
+        for pair, entry in positions_payload.items():
+            try:
+                state.positions[pair] = _PositionState.from_dict(entry)
+            except (TypeError, ValueError):
+                logger.debug("Failed to restore position for %s; skipping.", pair)
+
         return state
 
 
@@ -90,6 +137,8 @@ class RiskManager:
         "max_positions": 3,
         "max_daily_trades": 5,
         "min_trade_gap_minutes": 60,
+        "stop_loss": 0.03,
+        "take_profit": 0.06,
     }
 
     def __init__(self, state_path: Path):
@@ -120,7 +169,11 @@ class RiskManager:
         now = datetime.now(tz=timezone.utc)
         if self._state.as_of.date() != now.date():
             logger.info("Resetting risk counters for new day.")
-            self._state = _RiskState(as_of=now)
+            preserved_positions = {
+                pair: _PositionState(position.direction, position.entry_price, position.volume)
+                for pair, position in self._state.positions.items()
+            }
+            self._state = _RiskState(as_of=now, positions=preserved_positions)
             self._persist_state()
 
     def evaluate_signal(self, signal: StrategySignal, context: StrategyContext) -> RiskDecision:
@@ -130,6 +183,21 @@ class RiskManager:
         """
         self.reset_if_new_day()
         limits = self._merge_limits(context.config.risk)
+
+        existing_position = self._state.positions.get(context.pair)
+        is_buy = signal.action == "buy"
+        is_sell = signal.action == "sell"
+
+        if not (is_buy or is_sell):
+            return RiskDecision(False, f"Unsupported signal action '{signal.action}'.")
+
+        closing_position = bool(existing_position and existing_position.direction == "long" and is_sell)
+
+        if existing_position and existing_position.direction == "long" and is_buy:
+            return RiskDecision(False, "Existing long position already open; awaiting exit signal.")
+
+        if is_sell and not closing_position and existing_position is None:
+            return RiskDecision(False, "Short selling not permitted by risk policy.")
 
         if self._state.daily_trades >= limits["max_daily_trades"]:
             return RiskDecision(False, "Daily trade limit reached.")
@@ -141,24 +209,88 @@ class RiskManager:
             if elapsed < min_gap:
                 return RiskDecision(False, f"Minimum trade gap {min_gap} not met for {context.pair}.")
 
-        volume = self._calculate_volume(signal, context, limits)
+        if not closing_position:
+            open_positions = len(self._state.positions)
+            if existing_position is None and open_positions >= int(limits["max_positions"]):
+                return RiskDecision(False, "Maximum concurrent positions reached.")
+
+        volume = self._calculate_volume(signal, context, limits, existing_position, closing_position)
         if volume is None or volume <= 0:
             return RiskDecision(False, "Calculated trade volume is non-positive.")
 
-        # Placeholder for drawdown monitoring; ensures daily loss does not exceed threshold.
         account_equity = self._estimate_account_equity(context)
         if account_equity <= 0:
             logger.debug("Account equity estimation unavailable; proceeding with caution.")
-        elif self._state.daily_loss / account_equity >= limits["max_daily_loss"]:
-            return RiskDecision(False, "Maximum daily loss threshold reached.")
+        else:
+            max_loss_allowed = float(limits["max_daily_loss"]) * account_equity
+            if self._state.daily_loss >= max_loss_allowed:
+                return RiskDecision(False, "Maximum daily drawdown reached; halting trades.")
 
-        return RiskDecision(True, "Signal approved.", volume=volume, position_fraction=limits["position_size"])
+        entry_price = float(context.ohlcv["close"].iloc[-1])
+        stop_loss_price, take_profit_price = self._derive_protective_prices(
+            entry_price=entry_price,
+            limits=limits,
+            is_buy=is_buy,
+            closing_position=closing_position,
+        )
 
-    def record_execution(self, pair: str, pnl: float = 0.0) -> None:
-        """Record a trade execution to update daily counters."""
+        direction = "long" if (is_buy and not closing_position) else (existing_position.direction if existing_position else "flat")
+
+        return RiskDecision(
+            True,
+            "Signal approved.",
+            volume=volume,
+            position_fraction=float(limits["position_size"]),
+            direction=direction,
+            entry_price=entry_price,
+            stop_loss_price=stop_loss_price,
+            take_profit_price=take_profit_price,
+            closing_position=closing_position,
+        )
+
+    def record_execution(
+        self,
+        pair: str,
+        decision: RiskDecision,
+        context: StrategyContext,
+    ) -> float:
+        """Record a trade execution to update daily counters and realised PnL."""
+        self.reset_if_new_day()
+
         now = datetime.now(tz=timezone.utc)
+        exit_price = decision.entry_price or float(context.ohlcv["close"].iloc[-1])
+        realised_pnl = 0.0
+
+        if decision.closing_position:
+            position = self._state.positions.get(pair)
+            if position is None:
+                logger.debug("No tracked position to close for %s; skipping PnL computation.", pair)
+            else:
+                volume = min(position.volume, float(decision.volume or position.volume))
+                if position.direction == "long":
+                    realised_pnl = (exit_price - position.entry_price) * volume
+                else:
+                    realised_pnl = (position.entry_price - exit_price) * volume
+
+                if volume >= position.volume:
+                    self._state.positions.pop(pair, None)
+                else:
+                    position.volume -= volume
+                    self._state.positions[pair] = position
+        else:
+            entry_price = decision.entry_price or float(context.ohlcv["close"].iloc[-1])
+            volume = float(decision.volume or 0.0)
+            if volume > 0:
+                self._state.positions[pair] = _PositionState(
+                    direction=decision.direction or "long",
+                    entry_price=entry_price,
+                    volume=volume,
+                )
+
         self._state.daily_trades += 1
-        self._state.daily_loss = max(0.0, self._state.daily_loss + min(0.0, pnl))
+        if realised_pnl < 0:
+            self._state.daily_loss += abs(realised_pnl)
+        self._state.daily_realised_pnl += realised_pnl
 
         history = self._state.history_by_pair.setdefault(pair, _TradeHistory())
         history.last_trade_at = now
@@ -166,12 +298,18 @@ class RiskManager:
 
         self._state.as_of = now
         self._persist_state()
+        return realised_pnl
 
     def status(self) -> Dict[str, Any]:
         """Return current risk metrics for monitoring."""
         return {
             "daily_trades": self._state.daily_trades,
             "daily_loss": self._state.daily_loss,
+            "daily_realised_pnl": self._state.daily_realised_pnl,
+            "open_positions": {
+                pair: position.to_dict()
+                for pair, position in self._state.positions.items()
+            },
             "history": {
                 pair: {
                     "last_trade_at": history.last_trade_at.isoformat() if history.last_trade_at else None,
@@ -181,16 +319,29 @@ class RiskManager:
             },
         }
 
+    def open_positions(self) -> Dict[str, Dict[str, Any]]:
+        """Expose a copy of the tracked open positions."""
+        return {
+            pair: position.to_dict()
+            for pair, position in self._state.positions.items()
+        }
+
     @staticmethod
     def _merge_limits(risk_config: Dict[str, Any]) -> Dict[str, Any]:
         limits = RiskManager.DEFAULT_LIMITS.copy()
         for key, value in (risk_config or {}).items():
-            if key in limits:
+            if key in limits and value is not None:
                 limits[key] = value
         return limits
 
     @staticmethod
-    def _calculate_volume(signal: StrategySignal, context: StrategyContext, limits: Dict[str, Any]) -> Optional[float]:
+    def _calculate_volume(
+        signal: StrategySignal,
+        context: StrategyContext,
+        limits: Dict[str, Any],
+        existing_position: Optional[_PositionState],
+        closing_position: bool,
+    ) -> Optional[float]:
         """Derive trade volume based on balances and configured risk fraction."""
         balances = context.account_balances or {}
         close_price = float(context.ohlcv["close"].iloc[-1])
@@ -200,15 +351,20 @@ class RiskManager:
         base_asset = pair[:-3]
         quote_asset = pair[-3:]
 
+        if closing_position and existing_position is not None:
+            return existing_position.volume
+
         try:
             if signal.action == "buy":
-                quote_balance = float(balances.get(quote_asset, 0.0))
+                quote_balance = float(balances.get(quote_asset, balances.get(f"Z{quote_asset}", 0.0)))
                 position_value = quote_balance * position_fraction
                 if position_value <= 0:
                     return None
                 return position_value / close_price
             if signal.action == "sell":
-                base_balance = float(balances.get(base_asset, 0.0))
+                if existing_position is not None:
+                    return existing_position.volume
+                base_balance = float(balances.get(base_asset, balances.get(f"X{base_asset}", 0.0)))
                 return base_balance * position_fraction
         except (TypeError, ValueError) as exc:
             logger.debug("Failed to calculate volume for %s: %s", pair, exc)
@@ -224,3 +380,35 @@ class RiskManager:
             return max(0.0, usd_balance)
         except (TypeError, ValueError):
             return 0.0
+
+    @staticmethod
+    def _derive_protective_prices(
+        entry_price: float,
+        limits: Dict[str, Any],
+        is_buy: bool,
+        closing_position: bool,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Compute stop loss and take profit price levels for a trade."""
+        if closing_position:
+            return None, None
+
+        stop_loss_pct = limits.get("stop_loss")
+        take_profit_pct = limits.get("take_profit")
+
+        stop_loss_price: Optional[float] = None
+        take_profit_price: Optional[float] = None
+
+        try:
+            if stop_loss_pct:
+                stop_loss_pct = float(stop_loss_pct)
+                if stop_loss_pct > 0:
+                    stop_loss_price = entry_price * (1 - stop_loss_pct) if is_buy else entry_price * (1 + stop_loss_pct)
+            if take_profit_pct:
+                take_profit_pct = float(take_profit_pct)
+                if take_profit_pct > 0:
+                    take_profit_price = entry_price * (1 + take_profit_pct) if is_buy else entry_price * (1 - take_profit_pct)
+        except (TypeError, ValueError):
+            logger.debug("Invalid protective percentages configured; skipping stop/take profit calculations.")
+            return None, None
+
+        return stop_loss_price, take_profit_price
