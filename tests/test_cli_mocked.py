@@ -8,6 +8,7 @@ import json
 import os
 from contextlib import ExitStack
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import patch
@@ -328,3 +329,31 @@ class KrakenCliMockedTests(TestCase):
         self.assertIn("Export Job Status", result.output)
         self.assertIn("EXP123", result.output)
         status_mock.assert_called_once_with(report=None)
+
+    def test_export_report_retrieve_saves_file(self) -> None:
+        """Export retrieval should write archive to configured output directory."""
+
+        with TemporaryDirectory() as tmpdir, \
+                patch.object(kraken_cli, "EXPORT_OUTPUT_DIR", Path(tmpdir)), \
+                patch.object(
+                    KrakenAPIClient,
+                    "retrieve_export",
+                    return_value=(b"binary-data", {"Content-Disposition": "attachment; filename=export.zip"}),
+                ) as retrieve_mock:
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                [
+                    "export-report",
+                    "--retrieve-id",
+                    "EXP123",
+                ],
+                catch_exceptions=False,
+            )
+
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+            self.assertIn("Export saved to", result.output)
+            retrieve_mock.assert_called_once_with(report_id="EXP123")
+
+            written_path = Path(tmpdir) / "export.zip"
+            self.assertTrue(written_path.exists(), msg="Export file was not written")
+            self.assertEqual(written_path.read_bytes(), b"binary-data")

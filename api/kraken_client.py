@@ -168,8 +168,14 @@ class KrakenAPIClient:
         # Step 4: Encode result to base64
         return base64.b64encode(signature).decode()
     
-    def _make_request(self, endpoint: str, data: Optional[Dict] = None, 
-                     auth_required: bool = False, method: str = 'POST') -> Dict[str, Any]:
+    def _make_request(
+        self,
+        endpoint: str,
+        data: Optional[Dict] = None,
+        auth_required: bool = False,
+        method: str = 'POST',
+        raw: bool = False,
+    ) -> Any:
         """
         Make authenticated or public API request (Updated for 2025 API)
         
@@ -219,6 +225,10 @@ class KrakenAPIClient:
                 )
             
             response.raise_for_status()
+
+            if raw:
+                return response.content, dict(response.headers)
+
             result = response.json()
             
             # Check for API errors (2025 format: {"error": [], "result": {}})
@@ -235,6 +245,8 @@ class KrakenAPIClient:
         except requests.exceptions.RequestException as e:
             raise Exception(f"Request failed: {str(e)}")
         except json.JSONDecodeError as e:
+            if raw:
+                raise Exception(f"Invalid JSON response: {str(e)}")
             raise Exception(f"Invalid JSON response: {str(e)}")
         except Exception as e:
             raise Exception(f"API request failed: {str(e)}")
@@ -499,11 +511,16 @@ class KrakenAPIClient:
 
         return self._make_request("private/ExportStatus", data=data, auth_required=True)
 
-    def retrieve_export(self, report_id: str) -> Dict[str, Any]:
-        """Download a completed export archive reference."""
+    def retrieve_export(self, report_id: str) -> tuple[bytes, Dict[str, Any]]:
+        """Download a completed export archive as raw bytes with response headers."""
 
         data = {'id': report_id}
-        return self._make_request("private/RetrieveExport", data=data, auth_required=True)
+        return self._make_request(
+            "private/RetrieveExport",
+            data=data,
+            auth_required=True,
+            raw=True,
+        )
 
     def delete_export(self, report_id: str) -> Dict[str, Any]:
         """Delete a completed export job from Kraken servers."""

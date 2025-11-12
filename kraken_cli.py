@@ -48,6 +48,7 @@ setup_logging(log_level=config.log_level)
 AUTO_CONTROL_DIR = Path("logs/auto_trading")
 RISK_STATE_FILE = AUTO_CONTROL_DIR / "risk_state.json"
 AUTO_STATUS_FILE = AUTO_CONTROL_DIR / "status.json"
+EXPORT_OUTPUT_DIR = Path("logs/exports")
 
 TradingEngine: Any = None
 TradingEngineStatus: Any = None
@@ -83,6 +84,26 @@ def _convert_to_kraken_asset(currency_code: str) -> str:
     }
     
     return conversions.get(currency_code.upper(), currency_code.upper())
+
+
+def _extract_filename_from_headers(headers: Dict[str, Any], fallback: str) -> str:
+    """Extract filename from HTTP headers or fall back to provided value."""
+
+    if not headers:
+        return fallback
+
+    disposition = headers.get("Content-Disposition") or headers.get("content-disposition")
+    if not disposition:
+        return fallback
+
+    for part in disposition.split(';'):
+        part = part.strip()
+        if part.lower().startswith("filename="):
+            filename = part.split("=", 1)[1].strip().strip('"')
+            if filename:
+                return filename
+
+    return fallback
 
 
 def _ensure_auto_modules() -> None:
@@ -1134,22 +1155,28 @@ def export_report(ctx, report, description, export_format, fields, start, end, s
     if retrieve_id:
         console.print(f"[bold blue]🔍 Retrieving export job {retrieve_id}...[/bold blue]")
         try:
-            response = api_client.retrieve_export(report_id=retrieve_id)
+            content, headers = api_client.retrieve_export(report_id=retrieve_id)
         except Exception as exc:
             console.print(f"[red]❌ Failed to retrieve export: {exc}[/red]")
             return
 
-        payload = response.get('result') if isinstance(response, dict) else None
-        if not isinstance(payload, dict) or not payload:
-            console.print("[yellow]ℹ️  No data returned for the specified export job.[/yellow]")
+        if not content:
+            console.print("[yellow]ℹ️  Export data was empty for the specified job.[/yellow]")
             return
 
-        details = Table(title="Export Retrieval", show_lines=False)
-        details.add_column("Field", style="cyan")
-        details.add_column("Value", style="white")
-        for field, value in payload.items():
-            details.add_row(str(field), str(value))
-        console.print(details)
+        EXPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        filename = _extract_filename_from_headers(headers, fallback=f"{retrieve_id}.zip")
+        output_path = EXPORT_OUTPUT_DIR / filename
+
+        try:
+            with output_path.open('wb') as handle:
+                handle.write(content)
+        except OSError as exc:  # pragma: no cover - filesystem guard
+            console.print(f"[red]❌ Failed to write export file: {exc}[/red]")
+            return
+
+        console.print(f"[green]✅ Export saved to [bold]{output_path}[/bold].[/green]")
+        console.print("[yellow]💡 Extract the archive to review the exported data.[/yellow]")
         return
 
     if delete_id:

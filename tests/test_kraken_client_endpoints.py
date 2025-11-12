@@ -123,11 +123,14 @@ class KrakenClientEndpointTests(unittest.TestCase):
 
         mocked_status.assert_called_once_with("private/ExportStatus", data=None, auth_required=True)
 
-        with mock.patch.object(client, "_make_request", return_value={}) as mocked_retrieve:
+        with mock.patch.object(client, "_make_request", return_value=(b"data", {})) as mocked_retrieve:
             client.retrieve_export("REPORT-ID")
 
         mocked_retrieve.assert_called_once_with(
-            "private/RetrieveExport", data={"id": "REPORT-ID"}, auth_required=True
+            "private/RetrieveExport",
+            data={"id": "REPORT-ID"},
+            auth_required=True,
+            raw=True,
         )
 
         with mock.patch.object(client, "_make_request", return_value={}) as mocked_delete:
