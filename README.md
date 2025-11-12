@@ -348,6 +348,7 @@ KrakenCLI/
 
 - Kraken REST API reference: https://docs.kraken.com/rest/
 - Kraken support centre: https://support.kraken.com
+- Internal project blueprint: [Project Blueprint](docs/project_blueprint.md)
 ## License & Disclaimer
 
 This project is provided for educational and research purposes. It is not affiliated with Kraken, and the authors accept no liability for financial losses. By using the CLI you acknowledge the risks associated with cryptocurrency trading and agree to trade only with funds you can afford to lose.
