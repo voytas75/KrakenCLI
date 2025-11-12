@@ -10,9 +10,11 @@ import json
 import logging
 import os
 import time
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 from rich.console import Console
 
@@ -30,6 +32,7 @@ class AlertPayload:
     message: str
     severity: str
     details: Dict[str, Any]
+    timestamp: float
 
 
 class AlertManager:
@@ -63,6 +66,7 @@ class AlertManager:
         self._state = self._load_state()
         self._throttle_seconds = max(0.0, throttle_seconds)
         self._last_sent: Dict[str, float] = {}
+        self._history: Deque[AlertPayload] = deque(maxlen=20)
 
         default_enabled = False
         try:
@@ -125,6 +129,15 @@ class AlertManager:
             "channels": channels,
             "state_path": str(self._state_path.resolve()),
             "cooldown_seconds": self._throttle_seconds,
+            "recent_alerts": [
+                {
+                    "event": payload.event,
+                    "severity": payload.severity,
+                    "message": payload.message,
+                    "timestamp": datetime.fromtimestamp(payload.timestamp, tz=timezone.utc).isoformat(),
+                }
+                for payload in list(self._history)[-5:]
+            ],
         }
 
     def _channels(self) -> Dict[str, bool]:
@@ -159,6 +172,7 @@ class AlertManager:
             message=message,
             severity=severity.upper(),
             details=details or {},
+            timestamp=time.time(),
         )
 
         if not self._enabled and not force:
@@ -170,6 +184,7 @@ class AlertManager:
             return
 
         self._last_sent[payload.event] = time.monotonic()
+        self._history.append(payload)
         self._log_payload(payload)
         self._print_payload(payload)
 

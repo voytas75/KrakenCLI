@@ -97,6 +97,7 @@ class AlertManagerTests(unittest.TestCase):
         self.assertTrue(channels["webhook_configured"])
         self.assertTrue(channels["email_configured"])
         self.assertEqual(summary["cooldown_seconds"], 0)
+        self.assertIsInstance(summary.get("recent_alerts"), list)
 
     def test_throttle_suppresses_repeated_alerts(self) -> None:
         config = _StubConfig(enabled=True)
@@ -113,6 +114,8 @@ class AlertManagerTests(unittest.TestCase):
         manager.send(event="risk.test", message="Throttle check", severity="WARNING")
         output = console.export_text()
         self.assertEqual(output.count("Throttle check"), 1)
+        status = manager.status()
+        self.assertEqual(len(status["recent_alerts"]), 1)
 
 
 if __name__ == "__main__":  # pragma: no cover - test module entry point

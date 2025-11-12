@@ -1209,6 +1209,14 @@ def auto_status() -> None:
     alert_snapshot = AlertManager(config=config, console=console).status()
     table.add_row("Alerts Enabled", "✅" if alert_snapshot["enabled"] else "❌")
     table.add_row("Alert Cooldown", f"{int(alert_snapshot['cooldown_seconds'])}s")
+    recent = alert_snapshot.get("recent_alerts", [])
+    if recent:
+        table.add_row("Recent Alerts", "")
+        for entry in recent:
+            table.add_row(
+                f"  {entry['timestamp']}",
+                f"{entry['severity']}: {entry['event']} - {entry['message']}",
+            )
 
     console.print(table)
 

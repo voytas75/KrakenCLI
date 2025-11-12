@@ -251,6 +251,7 @@ Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and 
   - Disable alerts with `python kraken_cli.py risk-alerts --disable`; delete `logs/alert_state.json` to reset to config defaults.
   - When alerts fire you will see Rich console messages (e.g., `⚠️ Alert (risk.decision_rejected) …`) along with log entries in `kraken_cli.log` tagged as `[WARNING]` or `[ERROR]`.
   - Alerts are throttled (60 seconds by default) so repeated failures do not flood the terminal; critical stop events bypass the cooldown.
+  - `python kraken_cli.py auto-status` lists the last few alert events with UTC timestamps to speed up triage.
 
 ## Testing & Quality Assurance
 
