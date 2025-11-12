@@ -170,6 +170,8 @@ Precedence from highest to lowest:
 | `KRAKEN_SANDBOX`    | Toggle sandbox/test environment (`true`/`false`)   | `false` |
 | `KRAKEN_API_BASE_URL` | Override REST base URL (defaults to Kraken 2025 endpoint) | `https://api.kraken.com` |
 | `KRAKEN_RATE_LIMIT` | Requests per second throttle                       | `1`     |
+| `KRAKEN_PUBLIC_RATE_LIMIT` | Public endpoint throttle (requests per second)      | `1.0`   |
+| `KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN` | Private endpoint throttle (requests per minute) | `15.0`  |
 | `KRAKEN_TIMEOUT`    | HTTP request timeout in seconds                    | `30`    |
 | `KRAKEN_LOG_LEVEL`  | Root logger level (`INFO`, `DEBUG`, etc.)          | `INFO`  |
 | `AUTO_TRADING_ENABLED` | Enable the automated trading engine (`true`/`false`) | `false` |
@@ -189,6 +191,8 @@ KRAKEN_API_KEY=your_api_key_here
 KRAKEN_API_SECRET=your_api_secret_here
 KRAKEN_SANDBOX=false
 KRAKEN_RATE_LIMIT=1
+KRAKEN_PUBLIC_RATE_LIMIT=1.0
+KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN=15
 KRAKEN_TIMEOUT=30
 KRAKEN_LOG_LEVEL=INFO
 AUTO_TRADING_ENABLED=false

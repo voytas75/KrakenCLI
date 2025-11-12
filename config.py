@@ -32,6 +32,8 @@ class Config:
         "KRAKEN_RETRY_ATTEMPTS": ("KRAKEN_RETRY_ATTEMPTS",),
         "KRAKEN_RETRY_INITIAL_DELAY": ("KRAKEN_RETRY_INITIAL_DELAY",),
         "KRAKEN_RETRY_BACKOFF": ("KRAKEN_RETRY_BACKOFF",),
+        "KRAKEN_PUBLIC_RATE_LIMIT": ("KRAKEN_PUBLIC_RATE_LIMIT",),
+        "KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN": ("KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN",),
         "AUTO_TRADING_ENABLED": ("AUTO_TRADING_ENABLED",),
         "AUTO_TRADING_CONFIG_PATH": ("AUTO_TRADING_CONFIG_PATH",),
         "ALERT_WEBHOOK_URL": ("ALERT_WEBHOOK_URL",),
@@ -54,6 +56,8 @@ class Config:
         "KRAKEN_RETRY_ATTEMPTS": 3,
         "KRAKEN_RETRY_INITIAL_DELAY": 1.0,
         "KRAKEN_RETRY_BACKOFF": 1.5,
+        "KRAKEN_PUBLIC_RATE_LIMIT": 1.0,
+        "KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN": 15.0,
         "AUTO_TRADING_ENABLED": False,
         "AUTO_TRADING_CONFIG_PATH": "configs/auto_trading.yaml",
         "ALERT_WEBHOOK_URL": None,
@@ -80,6 +84,8 @@ class Config:
         retry_attempts_value = self._get_setting("KRAKEN_RETRY_ATTEMPTS")
         retry_initial_delay_value = self._get_setting("KRAKEN_RETRY_INITIAL_DELAY")
         retry_backoff_value = self._get_setting("KRAKEN_RETRY_BACKOFF")
+        public_rate_limit_value = self._get_setting("KRAKEN_PUBLIC_RATE_LIMIT")
+        private_rate_limit_value = self._get_setting("KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN")
         auto_trading_enabled_value = self._get_setting("AUTO_TRADING_ENABLED")
         auto_trading_config_value = self._get_setting("AUTO_TRADING_CONFIG_PATH")
         alert_webhook_value = self._get_setting("ALERT_WEBHOOK_URL")
@@ -106,6 +112,8 @@ class Config:
         self.retry_attempts: int = self._to_int(retry_attempts_value, self._DEFAULTS["KRAKEN_RETRY_ATTEMPTS"])
         self.retry_initial_delay: float = self._to_float(retry_initial_delay_value, self._DEFAULTS["KRAKEN_RETRY_INITIAL_DELAY"])
         self.retry_backoff: float = self._to_float(retry_backoff_value, self._DEFAULTS["KRAKEN_RETRY_BACKOFF"])
+        self.public_rate_limit: float = self._to_float(public_rate_limit_value, self._DEFAULTS["KRAKEN_PUBLIC_RATE_LIMIT"])
+        self.private_rate_limit_per_min: float = self._to_float(private_rate_limit_value, self._DEFAULTS["KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN"])
         self.auto_trading_enabled: bool = self._to_bool(auto_trading_enabled_value)
         self.auto_trading_config_path: Path = Path(str(auto_trading_config_value or self._DEFAULTS["AUTO_TRADING_CONFIG_PATH"]))
         self.alert_webhook_url: Optional[str] = str(alert_webhook_value).strip() if alert_webhook_value else None
@@ -206,6 +214,18 @@ class Config:
         - Private endpoints: 15-20 requests/minute (0.25-0.33 rps)
         """
         return self.rate_limit
+
+    def get_public_rate_limit(self) -> float:
+        """Return configured public endpoint rate limit (requests per second)."""
+        return max(0.01, float(self.public_rate_limit))
+
+    def get_private_rate_limit_per_min(self) -> float:
+        """Return configured private endpoint rate limit (requests per minute)."""
+        return max(1.0, float(self.private_rate_limit_per_min))
+
+    def get_private_rate_limit_per_second(self) -> float:
+        """Return private endpoint rate limit expressed in requests per second."""
+        return self.get_private_rate_limit_per_min() / 60.0
 
     def get_retry_attempts(self) -> int:
         """Return configured retry attempts for Kraken requests."""

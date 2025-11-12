@@ -27,6 +27,38 @@ class _CacheEntry:
     timestamp: float
 
 
+class _RateLimiter:
+    """Simple token-bucket rate limiter for API calls."""
+
+    def __init__(self, rate_per_second: float, capacity: float = 1.0) -> None:
+        self._rate = max(rate_per_second, 0.01)
+        self._capacity = max(capacity, 1.0)
+        self._tokens = self._capacity
+        self._lock = Lock()
+        self._last_check = time.monotonic()
+
+    def acquire(self) -> None:
+        """Block until a token is available."""
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                elapsed = now - self._last_check
+                self._last_check = now
+                self._tokens = min(
+                    self._capacity,
+                    self._tokens + elapsed * self._rate,
+                )
+
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+
+                # Calculate required sleep outside the lock.
+                deficit = 1.0 - self._tokens
+                wait_time = deficit / self._rate
+            time.sleep(wait_time)
+
+
 class KrakenAPIClient:
     """Kraken API client with proper authentication and error handling."""
 
@@ -42,6 +74,16 @@ class KrakenAPIClient:
         self.session.headers.update({
             'User-Agent': 'Kraken Pro CLI/1.0.0'
         })
+        public_rate = self.config.get_public_rate_limit()
+        private_rate = self.config.get_private_rate_limit_per_second()
+        self._public_rate_limiter = _RateLimiter(
+            rate_per_second=public_rate,
+            capacity=max(1.0, public_rate),
+        )
+        self._private_rate_limiter = _RateLimiter(
+            rate_per_second=private_rate,
+            capacity=1.0,
+        )
         self._cache_lock = Lock()
         self._orders_cache: Optional[_CacheEntry] = None
         self._ledgers_cache: Dict[Tuple[Any, ...], _CacheEntry] = {}
@@ -184,9 +226,10 @@ class KrakenAPIClient:
         - Response: {"error": [], "result": {}}
         """
         url = f"{self.base_url}/0/{endpoint}"
+
+        self.rate_limit_delay(auth_required=auth_required)
         
         if auth_required:
-            self.rate_limit_delay()
             # Add authentication
             nonce = str(int(time.time() * 1000000))  # microsecond timestamp
             if data is None:
@@ -545,12 +588,12 @@ class KrakenAPIClient:
         """Get tradable asset pairs"""
         return self._make_request("public/AssetPairs", method='GET')
     
-    def rate_limit_delay(self):
+    def rate_limit_delay(self, auth_required: bool = True) -> None:
         """
-        Implement rate limiting (Updated for 2025 API)
+        Apply rate limiting for Kraken API calls using token-bucket throttling.
         
-        Current limits:
-        - Public endpoints: 1 request/second
-        - Private endpoints: 15-20 requests/minute
+        Args:
+            auth_required: When True, applies the stricter private-endpoint limit.
         """
-        time.sleep(1.2)  # Conservative delay for 2025 API compliance
+        limiter = self._private_rate_limiter if auth_required else self._public_rate_limiter
+        limiter.acquire()
