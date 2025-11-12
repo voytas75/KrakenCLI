@@ -2,10 +2,11 @@
 Trading functionality for Kraken API.
 
 Updates: v0.9.4 - 2025-11-12 - Added cache refresh helper for order and ledger data.
+Updates: v0.9.7 - 2025-11-13 - Normalised balance validation for Kraken-prefixed asset codes.
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 from api.kraken_client import KrakenAPIClient
 
 logger = logging.getLogger(__name__)
@@ -13,9 +14,71 @@ logger = logging.getLogger(__name__)
 
 class Trader:
     """Handles trading operations for Kraken exchange"""
-    
+
+    _KNOWN_QUOTE_SUFFIXES: Tuple[str, ...] = (
+        "ZUSDT",
+        "USDT",
+        "ZUSDC",
+        "USDC",
+        "ZUSD",
+        "USD",
+        "ZEUR",
+        "EUR",
+        "ZGBP",
+        "GBP",
+        "ZJPY",
+        "JPY",
+        "ZCAD",
+        "CAD",
+        "ZCHF",
+        "CHF",
+        "ZETH",
+        "ETH",
+        "ZBTC",
+        "BTC",
+        "XXBT",
+        "XBT",
+    )
+
     def __init__(self, api_client: KrakenAPIClient):
         self.api_client = api_client
+
+    @classmethod
+    def _split_pair(cls, pair: str) -> Tuple[str, str]:
+        """Return raw base/quote assets for a Kraken trading pair."""
+
+        upper_pair = (pair or "").upper()
+        for quote in cls._KNOWN_QUOTE_SUFFIXES:
+            if upper_pair.endswith(quote) and len(upper_pair) > len(quote):
+                base = upper_pair[: -len(quote)]
+                return base, quote
+
+        if len(upper_pair) >= 6:
+            return upper_pair[:3], upper_pair[3:]
+
+        return upper_pair, ""
+
+    @staticmethod
+    def _candidate_balance_keys(asset: str) -> List[str]:
+        """Return possible balance dictionary keys for a Kraken asset code."""
+
+        variants: List[str] = []
+        if not asset:
+            return variants
+
+        normalized = asset.upper()
+        variants.append(normalized)
+
+        stripped = normalized
+        while stripped.startswith(("X", "Z")) and len(stripped) > 3:
+            stripped = stripped[1:]
+            variants.extend([stripped, f"X{stripped}", f"Z{stripped}"])
+
+        seen: Dict[str, None] = {}
+        for candidate in variants:
+            if candidate and candidate not in seen:
+                seen[candidate] = None
+        return list(seen.keys())
 
     def refresh_state(self) -> None:
         """Clear cached Kraken responses to ensure up-to-date trading state."""
@@ -173,31 +236,43 @@ class Trader:
                                   volume: float, price: Optional[float] = None) -> bool:
         """Check if account has sufficient balance for the order"""
         try:
-            # Get current balances
             balance = self.api_client.get_account_balance()
             if not balance or 'result' not in balance:
                 return False
-            
+
             balance_data = balance['result']
-            
-            # Get the asset we need to spend
+            base_asset, quote_asset = self._split_pair(pair)
+
             if type == 'buy':
-                # For buy orders, we need the quote currency
-                quote_asset = pair[-3:]  # Last 3 characters (USD, EUR, etc.)
                 required_amount = self.calculate_order_value(pair, volume, price)
-                
-                if required_amount:
-                    available_balance = float(balance_data.get(f'{quote_asset}', '0'))
-                    return available_balance >= required_amount
-                    
-            elif type == 'sell':
-                # For sell orders, we need the base currency
-                base_asset = pair[:-3]  # First part of the pair
-                available_balance = float(balance_data.get(f'{base_asset}', '0'))
-                return available_balance >= volume
-            
+                if required_amount is None:
+                    return False
+
+                for candidate in self._candidate_balance_keys(quote_asset):
+                    available = balance_data.get(candidate)
+                    if available is None:
+                        continue
+                    try:
+                        if float(available) >= required_amount:
+                            return True
+                    except (TypeError, ValueError):
+                        continue
+                return False
+
+            if type == 'sell':
+                for candidate in self._candidate_balance_keys(base_asset):
+                    available = balance_data.get(candidate)
+                    if available is None:
+                        continue
+                    try:
+                        if float(available) >= volume:
+                            return True
+                    except (TypeError, ValueError):
+                        continue
+                return False
+
             return False
-            
+
         except Exception as e:
             logger.error(f"Failed to validate balance: {str(e)}")
             return False

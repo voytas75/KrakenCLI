@@ -3,6 +3,7 @@ Configuration management for Kraken CLI.
 
 Updates: v0.9.0 - 2025-11-11 - Added automated trading and alert configuration options.
 Updates: v0.9.5 - 2025-11-13 - Adopted single Kraken API base URL per 2025 guidance.
+Updates: v0.9.7 - 2025-11-13 - Introduced configurable endpoint weights for rate limiting.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ class Config:
         "KRAKEN_RETRY_BACKOFF": ("KRAKEN_RETRY_BACKOFF",),
         "KRAKEN_PUBLIC_RATE_LIMIT": ("KRAKEN_PUBLIC_RATE_LIMIT",),
         "KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN": ("KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN",),
+        "KRAKEN_ENDPOINT_WEIGHTS": ("KRAKEN_ENDPOINT_WEIGHTS",),
         "AUTO_TRADING_ENABLED": ("AUTO_TRADING_ENABLED",),
         "AUTO_TRADING_CONFIG_PATH": ("AUTO_TRADING_CONFIG_PATH",),
         "ALERT_WEBHOOK_URL": ("ALERT_WEBHOOK_URL",),
@@ -58,6 +60,7 @@ class Config:
         "KRAKEN_RETRY_BACKOFF": 1.5,
         "KRAKEN_PUBLIC_RATE_LIMIT": 1.0,
         "KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN": 15.0,
+        "KRAKEN_ENDPOINT_WEIGHTS": {},
         "AUTO_TRADING_ENABLED": False,
         "AUTO_TRADING_CONFIG_PATH": "configs/auto_trading.yaml",
         "ALERT_WEBHOOK_URL": None,
@@ -86,6 +89,7 @@ class Config:
         retry_backoff_value = self._get_setting("KRAKEN_RETRY_BACKOFF")
         public_rate_limit_value = self._get_setting("KRAKEN_PUBLIC_RATE_LIMIT")
         private_rate_limit_value = self._get_setting("KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN")
+        endpoint_weights_value = self._get_setting("KRAKEN_ENDPOINT_WEIGHTS")
         auto_trading_enabled_value = self._get_setting("AUTO_TRADING_ENABLED")
         auto_trading_config_value = self._get_setting("AUTO_TRADING_CONFIG_PATH")
         alert_webhook_value = self._get_setting("ALERT_WEBHOOK_URL")
@@ -114,6 +118,7 @@ class Config:
         self.retry_backoff: float = self._to_float(retry_backoff_value, self._DEFAULTS["KRAKEN_RETRY_BACKOFF"])
         self.public_rate_limit: float = self._to_float(public_rate_limit_value, self._DEFAULTS["KRAKEN_PUBLIC_RATE_LIMIT"])
         self.private_rate_limit_per_min: float = self._to_float(private_rate_limit_value, self._DEFAULTS["KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN"])
+        self.endpoint_weights: Dict[str, float] = self._parse_endpoint_weights(endpoint_weights_value)
         self.auto_trading_enabled: bool = self._to_bool(auto_trading_enabled_value)
         self.auto_trading_config_path: Path = Path(str(auto_trading_config_value or self._DEFAULTS["AUTO_TRADING_CONFIG_PATH"]))
         self.alert_webhook_url: Optional[str] = str(alert_webhook_value).strip() if alert_webhook_value else None
@@ -192,6 +197,36 @@ class Config:
         return [item.strip() for item in str(value).split(",") if item.strip()]
 
     @staticmethod
+    def _parse_endpoint_weights(value: Any) -> Dict[str, float]:
+        """Parse endpoint weight mapping from env/config settings."""
+
+        if not value:
+            return {}
+
+        payload: Any = value
+        if isinstance(value, str):
+            try:
+                payload = json.loads(value)
+            except json.JSONDecodeError as exc:
+                logger.warning("Unable to parse KRAKEN_ENDPOINT_WEIGHTS: %s", exc)
+                return {}
+
+        if not isinstance(payload, dict):
+            logger.warning("Endpoint weights configuration must be a mapping (received %s)", type(payload))
+            return {}
+
+        weights: Dict[str, float] = {}
+        for key, raw in payload.items():
+            try:
+                weight = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if weight <= 0:
+                continue
+            weights[str(key)] = weight
+        return weights
+
+    @staticmethod
     def _normalise_base_url(value: Any, default: str) -> str:
         """Normalise API base URL, ensuring no trailing slash."""
         if value in (None, ""):
@@ -226,6 +261,31 @@ class Config:
     def get_private_rate_limit_per_second(self) -> float:
         """Return private endpoint rate limit expressed in requests per second."""
         return self.get_private_rate_limit_per_min() / 60.0
+
+    def get_endpoint_cost(self, endpoint: str, auth_required: bool) -> float:
+        """Return weighting cost for rate limiting the specified endpoint."""
+
+        if not endpoint:
+            return 1.0
+
+        key = endpoint.strip()
+        weights = self.endpoint_weights
+
+        if key in weights:
+            return max(0.1, weights[key])
+
+        wildcard = "private/*" if auth_required else "public/*"
+        if wildcard in weights:
+            return max(0.1, weights[wildcard])
+
+        endpoint_name = key.split("/", 1)[-1]
+        if endpoint_name in weights:
+            return max(0.1, weights[endpoint_name])
+
+        if "*" in weights:
+            return max(0.1, weights["*"])
+
+        return 1.0
 
     def get_retry_attempts(self) -> int:
         """Return configured retry attempts for Kraken requests."""

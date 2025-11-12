@@ -5,14 +5,20 @@ echo "🧪 Running Kraken CLI Test Suite"
 echo "================================="
 
 # Respectively run Python comprehensive regression and pytest suites.
-set -e
+set -euo pipefail
 
 python tests/comprehensive_test.py
 
-python -m pytest \
+python -m coverage erase
+python -m coverage run \
+  --source=alerts,api,cli,engine,portfolio,risk,strategies,trading,utils,kraken_cli,config \
+  -m pytest \
   tests/test_rate_limit_enforcement.py \
+  tests/test_trader_balance_validation.py \
   tests/test_trading_engine.py \
   tests/test_cli_mocked.py
+
+python -m coverage report --fail-under=80
 
 echo ""
 echo "🎉 Test execution completed!"

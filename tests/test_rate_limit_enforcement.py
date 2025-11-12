@@ -32,7 +32,7 @@ def test_private_request_invokes_rate_limit_delay() -> None:
     with mock.patch.object(client, "rate_limit_delay") as mocked_delay:
         client._make_request("private/Balance", data={}, auth_required=True)
 
-    mocked_delay.assert_called_once_with(auth_required=True)
+    mocked_delay.assert_called_once_with(endpoint="private/Balance", auth_required=True)
 
 
 def test_public_request_invokes_rate_limit_delay() -> None:
@@ -42,7 +42,7 @@ def test_public_request_invokes_rate_limit_delay() -> None:
     with mock.patch.object(client, "rate_limit_delay") as mocked_delay:
         client._make_request("public/Time", method="GET")
 
-    mocked_delay.assert_called_once_with(auth_required=False)
+    mocked_delay.assert_called_once_with(endpoint="public/Time", auth_required=False)
 
 
 def test_rate_limit_delay_routes_to_private_limiter() -> None:
@@ -51,9 +51,9 @@ def test_rate_limit_delay_routes_to_private_limiter() -> None:
     with mock.patch.object(client._private_rate_limiter, "acquire") as private_acquire, mock.patch.object(
         client._public_rate_limiter, "acquire"
     ) as public_acquire:
-        client.rate_limit_delay(auth_required=True)
+        client.rate_limit_delay(endpoint="private/Balance", auth_required=True)
 
-    private_acquire.assert_called_once()
+    private_acquire.assert_called_once_with(1.0)
     public_acquire.assert_not_called()
 
 
@@ -63,7 +63,18 @@ def test_rate_limit_delay_routes_to_public_limiter() -> None:
     with mock.patch.object(client._private_rate_limiter, "acquire") as private_acquire, mock.patch.object(
         client._public_rate_limiter, "acquire"
     ) as public_acquire:
-        client.rate_limit_delay(auth_required=False)
+        client.rate_limit_delay(endpoint="public/Ticker", auth_required=False)
 
-    public_acquire.assert_called_once()
+    public_acquire.assert_called_once_with(1.0)
     private_acquire.assert_not_called()
+
+
+def test_rate_limit_delay_uses_endpoint_costs() -> None:
+    client = _build_client()
+    with mock.patch.object(client.config, "get_endpoint_cost", return_value=2.5) as cost_mock, mock.patch.object(
+        client._private_rate_limiter, "acquire"
+    ) as private_acquire:
+        client.rate_limit_delay(endpoint="private/AddOrder", auth_required=True)
+
+    cost_mock.assert_called_once_with("private/AddOrder", True)
+    private_acquire.assert_called_once_with(2.5)

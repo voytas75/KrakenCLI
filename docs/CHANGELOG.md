@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Introduce an automated diagnostics command for optional dependency and configuration checks.
 - Implement adaptive rate limiting tuned to Kraken's endpoint categories.
 
+### Added
+- Trader balance validation tests for Kraken asset prefixes.
+- Configurable endpoint weights feeding the API client rate limiter.
+
+### Changed
+- `run_tests.sh` now runs coverage and fails when overall coverage falls below 80%.
+
 ### Changed
 - `run_tests.sh` now executes the comprehensive suite plus pytest coverage for rate limits, automation, and CLI behaviour.
 

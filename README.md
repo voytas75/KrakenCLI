@@ -172,6 +172,7 @@ Precedence from highest to lowest:
 | `KRAKEN_RATE_LIMIT` | Requests per second throttle                       | `1`     |
 | `KRAKEN_PUBLIC_RATE_LIMIT` | Public endpoint throttle (requests per second)      | `1.0`   |
 | `KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN` | Private endpoint throttle (requests per minute) | `15.0`  |
+| `KRAKEN_ENDPOINT_WEIGHTS` | JSON mapping of endpoint names to weighted cost (e.g., `{"private/AddOrder": 4}`) | `{}` |
 | `KRAKEN_TIMEOUT`    | HTTP request timeout in seconds                    | `30`    |
 | `KRAKEN_LOG_LEVEL`  | Root logger level (`INFO`, `DEBUG`, etc.)          | `INFO`  |
 | `AUTO_TRADING_ENABLED` | Enable the automated trading engine (`true`/`false`) | `false` |
@@ -193,6 +194,7 @@ KRAKEN_SANDBOX=false
 KRAKEN_RATE_LIMIT=1
 KRAKEN_PUBLIC_RATE_LIMIT=1.0
 KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN=15
+KRAKEN_ENDPOINT_WEIGHTS={"private/AddOrder": 4, "private/*": 1.5}
 KRAKEN_TIMEOUT=30
 KRAKEN_LOG_LEVEL=INFO
 AUTO_TRADING_ENABLED=false
@@ -278,7 +280,9 @@ python kraken_cli.py --help
 python kraken_cli.py status
 python kraken_cli.py orders
 python kraken_cli.py ticker -p ETHUSD
-./run_tests.sh  # runs comprehensive test plus targeted pytest suites
+./run_tests.sh  # runs comprehensive test, pytest suites, and enforces ≥80% coverage
+
+Coverage enforcement relies on the `coverage` package (`pip install coverage`). The report fails when project coverage drops below 80%, ensuring parity with the KrakenCLI testing mandate.
 ```
 
 Ensure commands that hit authenticated endpoints handle missing credentials gracefully when running in non-production environments.

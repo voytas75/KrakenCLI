@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- Trader balance validation tests covering Kraken-prefixed asset codes.
+- Configuration support for weighted Kraken endpoint costs in the rate limiter.
+
+### Changed
+- `run_tests.sh` now enforces ≥80% coverage via the coverage CLI.
+
 ### Planned
 - Expand automated trading test coverage (engine cycles, strategy signals, risk persistence).
 - Implement dynamic rate limiter aligned with configurable thresholds.

@@ -3,6 +3,7 @@ Kraken API Client
 Official Kraken exchange API wrapper with authentication
 
 Updates: v0.9.4 - 2025-11-12 - Added caching plus withdrawal and export endpoint helpers.
+Updates: v0.9.7 - 2025-11-13 - Added weighted endpoint costs to the Kraken rate limiter.
 """
 
 import copy
@@ -37,8 +38,13 @@ class _RateLimiter:
         self._lock = Lock()
         self._last_check = time.monotonic()
 
-    def acquire(self) -> None:
-        """Block until a token is available."""
+    def acquire(self, cost: float = 1.0) -> None:
+        """Block until at least ``cost`` tokens are available."""
+
+        required = max(cost, 0.0)
+        if required <= 0.0:
+            return
+
         while True:
             with self._lock:
                 now = time.monotonic()
@@ -49,14 +55,13 @@ class _RateLimiter:
                     self._tokens + elapsed * self._rate,
                 )
 
-                if self._tokens >= 1.0:
-                    self._tokens -= 1.0
+                if self._tokens >= required:
+                    self._tokens -= required
                     return
 
-                # Calculate required sleep outside the lock.
-                deficit = 1.0 - self._tokens
-                wait_time = deficit / self._rate
-            time.sleep(wait_time)
+                deficit = required - self._tokens
+                wait_time = deficit / self._rate if self._rate > 0 else 1.0
+            time.sleep(max(wait_time, 0.001))
 
 
 class KrakenAPIClient:
@@ -227,7 +232,7 @@ class KrakenAPIClient:
         """
         url = f"{self.base_url}/0/{endpoint}"
 
-        self.rate_limit_delay(auth_required=auth_required)
+        self.rate_limit_delay(endpoint=endpoint, auth_required=auth_required)
         
         if auth_required:
             # Add authentication
@@ -588,12 +593,13 @@ class KrakenAPIClient:
         """Get tradable asset pairs"""
         return self._make_request("public/AssetPairs", method='GET')
     
-    def rate_limit_delay(self, auth_required: bool = True) -> None:
+    def rate_limit_delay(self, endpoint: str, auth_required: bool = True) -> None:
         """
         Apply rate limiting for Kraken API calls using token-bucket throttling.
-        
+
         Args:
             auth_required: When True, applies the stricter private-endpoint limit.
         """
         limiter = self._private_rate_limiter if auth_required else self._public_rate_limiter
-        limiter.acquire()
+        cost = self.config.get_endpoint_cost(endpoint, auth_required)
+        limiter.acquire(cost)
