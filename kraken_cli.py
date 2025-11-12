@@ -1116,6 +1116,10 @@ def auto_start(
             interval=interval,
             dry_run=dry_run,
         )
+        console.print(
+            "ℹ️  To terminate: press [bold]Ctrl+C[/bold] in this session or run "
+            "[cyan]python kraken_cli.py auto-stop[/cyan] from another terminal."
+        )
         engine.run_forever(
             strategy_keys=strategy_keys,
             dry_run=dry_run,
