@@ -46,13 +46,14 @@ logger = logging.getLogger(__name__)
 # Setup logging
 setup_logging(log_level=config.log_level)
 
+_MAX_RETRY_ATTEMPTS = config.get_retry_attempts()
+_RETRY_INITIAL_DELAY = config.get_retry_initial_delay()
+_RETRY_BACKOFF_FACTOR = config.get_retry_backoff()
+
 AUTO_CONTROL_DIR = Path("logs/auto_trading")
 RISK_STATE_FILE = AUTO_CONTROL_DIR / "risk_state.json"
 AUTO_STATUS_FILE = AUTO_CONTROL_DIR / "status.json"
 EXPORT_OUTPUT_DIR = Path("logs/exports")
-_MAX_RETRY_ATTEMPTS = 3
-_RETRY_INITIAL_DELAY = 1.0
-_RETRY_BACKOFF_FACTOR = 1.5
 
 TradingEngine: Any = None
 TradingEngineStatus: Any = None
@@ -803,7 +804,11 @@ def orders(ctx, status, trades, verbose):
     try:
         if trades:
             console.print("[bold blue]📊 Fetching trade history...[/bold blue]")
-            trades_data = portfolio.get_trade_history()
+            trades_data = _call_with_retries(
+                lambda: portfolio.get_trade_history(),
+                "Trade history fetch",
+                display_label="🔄 Fetching trade history",
+            )
             
             if trades_data:
                 table = Table(title="Trade History")
@@ -830,7 +835,11 @@ def orders(ctx, status, trades, verbose):
                 console.print("[yellow]No trade history found[/yellow]")
         else:
             console.print("[bold blue]📋 Fetching open orders...[/bold blue]")
-            orders_data = portfolio.get_open_orders(refresh=True)
+            orders_data = _call_with_retries(
+                lambda: portfolio.get_open_orders(refresh=True),
+                "Open orders fetch",
+                display_label="🔄 Fetching open orders",
+            )
             
             if orders_data:
                 if verbose:
@@ -1477,7 +1486,11 @@ def portfolio(ctx, pair):
         console.print("[bold blue]💼 Portfolio Overview[/bold blue]")
         
         # Get balances
-        summary = portfolio.get_portfolio_summary(refresh=True)
+        summary = _call_with_retries(
+            lambda: portfolio.get_portfolio_summary(refresh=True),
+            "Portfolio summary fetch",
+            display_label="🔄 Refreshing portfolio",
+        )
         asset_rows = summary.get('significant_assets', []) if summary else []
         
         if asset_rows:

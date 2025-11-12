@@ -27,6 +27,9 @@ class Config:
         "KRAKEN_RATE_LIMIT": ("KRAKEN_RATE_LIMIT", "rate_limit"),
         "KRAKEN_TIMEOUT": ("KRAKEN_TIMEOUT", "timeout"),
         "KRAKEN_LOG_LEVEL": ("KRAKEN_LOG_LEVEL", "LOG_LEVEL", "log_level"),
+        "KRAKEN_RETRY_ATTEMPTS": ("KRAKEN_RETRY_ATTEMPTS",),
+        "KRAKEN_RETRY_INITIAL_DELAY": ("KRAKEN_RETRY_INITIAL_DELAY",),
+        "KRAKEN_RETRY_BACKOFF": ("KRAKEN_RETRY_BACKOFF",),
         "AUTO_TRADING_ENABLED": ("AUTO_TRADING_ENABLED",),
         "AUTO_TRADING_CONFIG_PATH": ("AUTO_TRADING_CONFIG_PATH",),
         "ALERT_WEBHOOK_URL": ("ALERT_WEBHOOK_URL",),
@@ -45,6 +48,9 @@ class Config:
         "KRAKEN_RATE_LIMIT": 1,
         "KRAKEN_TIMEOUT": 30,
         "KRAKEN_LOG_LEVEL": "INFO",
+        "KRAKEN_RETRY_ATTEMPTS": 3,
+        "KRAKEN_RETRY_INITIAL_DELAY": 1.0,
+        "KRAKEN_RETRY_BACKOFF": 1.5,
         "AUTO_TRADING_ENABLED": False,
         "AUTO_TRADING_CONFIG_PATH": "configs/auto_trading.yaml",
         "ALERT_WEBHOOK_URL": None,
@@ -67,6 +73,9 @@ class Config:
         rate_limit_value = self._get_setting("KRAKEN_RATE_LIMIT")
         timeout_value = self._get_setting("KRAKEN_TIMEOUT")
         log_level_value = self._get_setting("KRAKEN_LOG_LEVEL")
+        retry_attempts_value = self._get_setting("KRAKEN_RETRY_ATTEMPTS")
+        retry_initial_delay_value = self._get_setting("KRAKEN_RETRY_INITIAL_DELAY")
+        retry_backoff_value = self._get_setting("KRAKEN_RETRY_BACKOFF")
         auto_trading_enabled_value = self._get_setting("AUTO_TRADING_ENABLED")
         auto_trading_config_value = self._get_setting("AUTO_TRADING_CONFIG_PATH")
         alert_webhook_value = self._get_setting("ALERT_WEBHOOK_URL")
@@ -87,6 +96,9 @@ class Config:
         self.rate_limit: int = self._to_int(rate_limit_value, self._DEFAULTS["KRAKEN_RATE_LIMIT"])
         self.timeout: int = self._to_int(timeout_value, self._DEFAULTS["KRAKEN_TIMEOUT"])
         self.log_level: str = str(log_level_value or self._DEFAULTS["KRAKEN_LOG_LEVEL"]).upper()
+        self.retry_attempts: int = self._to_int(retry_attempts_value, self._DEFAULTS["KRAKEN_RETRY_ATTEMPTS"])
+        self.retry_initial_delay: float = self._to_float(retry_initial_delay_value, self._DEFAULTS["KRAKEN_RETRY_INITIAL_DELAY"])
+        self.retry_backoff: float = self._to_float(retry_backoff_value, self._DEFAULTS["KRAKEN_RETRY_BACKOFF"])
         self.auto_trading_enabled: bool = self._to_bool(auto_trading_enabled_value)
         self.auto_trading_config_path: Path = Path(str(auto_trading_config_value or self._DEFAULTS["AUTO_TRADING_CONFIG_PATH"]))
         self.alert_webhook_url: Optional[str] = str(alert_webhook_value).strip() if alert_webhook_value else None
@@ -145,6 +157,17 @@ class Config:
             return default
 
     @staticmethod
+    def _to_float(value: Any, default: float) -> float:
+        """Convert a configuration value to float with fallback."""
+
+        try:
+            if value is None or value == "":
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
     def _parse_recipients(value: Any) -> list[str]:
         """Parse comma-separated email recipient list."""
         if not value:
@@ -166,6 +189,21 @@ class Config:
         - Private endpoints: 15-20 requests/minute (0.25-0.33 rps)
         """
         return self.rate_limit
+
+    def get_retry_attempts(self) -> int:
+        """Return configured retry attempts for Kraken requests."""
+
+        return max(1, self.retry_attempts)
+
+    def get_retry_initial_delay(self) -> float:
+        """Return initial retry delay in seconds."""
+
+        return max(0.1, self.retry_initial_delay)
+
+    def get_retry_backoff(self) -> float:
+        """Return exponential backoff factor for retries."""
+
+        return max(1.0, self.retry_backoff)
 
     def get_timeout(self) -> int:
         """Get request timeout in seconds."""
