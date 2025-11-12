@@ -1118,7 +1118,8 @@ def auto_start(
         )
         console.print(
             "ℹ️  To terminate: press [bold]Ctrl+C[/bold] in this session or run "
-            "[cyan]python kraken_cli.py auto-stop[/cyan] from another terminal."
+            "[cyan]python kraken_cli.py auto-stop[/cyan] from another terminal. "
+            "The engine stops after the current cycle finishes (API calls and cool-down)."
         )
         engine.run_forever(
             strategy_keys=strategy_keys,

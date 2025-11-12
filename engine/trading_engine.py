@@ -152,6 +152,12 @@ class TradingEngine:
             while not self._should_stop():
                 cycle_count += 1
                 start_time = time.perf_counter()
+                logger.info(
+                    "Starting trading cycle %d (dry_run=%s, poll_interval=%ss)",
+                    cycle_count,
+                    dry_run,
+                    interval,
+                )
                 try:
                     processed = self.run_once(
                         strategy_keys=strategy_keys,
@@ -162,6 +168,11 @@ class TradingEngine:
                     self._status.processed_signals = processed
                     self._status.last_cycle_at = datetime.now(tz=timezone.utc)
                     self._status.last_error = None
+                    logger.info(
+                        "Completed trading cycle %d (processed_signals=%d)",
+                        cycle_count,
+                        processed,
+                    )
                 except Exception as exc:  # pragma: no cover - protective guard
                     logger.exception("Trading engine cycle failed: %s", exc)
                     self._status.last_error = str(exc)
