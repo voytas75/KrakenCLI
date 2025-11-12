@@ -63,6 +63,7 @@ class KrakenAPIClient:
         url = f"{self.base_url}/0/{endpoint}"
         
         if auth_required:
+            self.rate_limit_delay()
             # Add authentication
             nonce = str(int(time.time() * 1000000))  # microsecond timestamp
             if data is None:
