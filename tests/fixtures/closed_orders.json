@@ -1,0 +1,171 @@
+{
+  "error": [],
+  "result": {
+    "closed": {
+      "O7ZPIE-UVSMR-3GLDR4": {
+        "refid": null,
+        "userref": 0,
+        "status": "canceled",
+        "opentm": 1762882357.188016,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "buy",
+          "ordertype": "limit",
+          "price": "1000.00",
+          "price2": "0",
+          "leverage": "none",
+          "order": "buy 0.00100000 ETHUSD @ limit 1000.00",
+          "close": ""
+        },
+        "vol": "0.00100000",
+        "vol_exec": "0.00000000",
+        "cost": "0.00000",
+        "fee": "0.00000",
+        "price": "0.00000",
+        "stopprice": "0.00000",
+        "limitprice": "0.00000",
+        "misc": "",
+        "oflags": "fciq",
+        "reason": "User requested",
+        "closetm": 1762882488.249684
+      },
+      "OTI2M5-UM7L3-JJC7VG": {
+        "refid": null,
+        "userref": 0,
+        "status": "closed",
+        "opentm": 1762153696.151482,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "buy",
+          "ordertype": "limit",
+          "price": "3705.37",
+          "price2": "0",
+          "leverage": "none",
+          "order": "buy 0.03637693 ETHUSD @ limit 3705.37",
+          "close": ""
+        },
+        "vol": "0.03637693",
+        "vol_exec": "0.03637693",
+        "cost": "134.78999",
+        "fee": "0.33697",
+        "price": "3705.37",
+        "stopprice": "0.00000",
+        "limitprice": "0.00000",
+        "misc": "",
+        "oflags": "fciq",
+        "trades": [
+          "TP7QCD-ZNZVC-74ZEV7"
+        ],
+        "reason": null,
+        "closetm": 1762157744.239864
+      },
+      "O65PCT-IFLDV-ZU7IU6": {
+        "refid": null,
+        "userref": 0,
+        "status": "closed",
+        "opentm": 1762127942.03724,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "sell",
+          "ordertype": "limit",
+          "price": "3912.60",
+          "price2": "0",
+          "leverage": "none",
+          "order": "sell 0.03480000 ETHUSD @ limit 3912.60",
+          "close": ""
+        },
+        "vol": "0.03480000",
+        "vol_exec": "0.03480000",
+        "cost": "136.15848",
+        "fee": "0.34040",
+        "price": "3912.60",
+        "stopprice": "0.00000",
+        "limitprice": "0.00000",
+        "misc": "",
+        "oflags": "fcib",
+        "trades": [
+          "TKTEON-PM6FR-5MJ3CI"
+        ],
+        "reason": null,
+        "closetm": 1762128603.17359
+      },
+      "OREMOV-Z3Q2R-UNSTTB": {
+        "refid": null,
+        "userref": 0,
+        "status": "closed",
+        "opentm": 1756119858.111761,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "buy",
+          "ordertype": "trailing-stop-limit",
+          "price": "4647.04",
+          "price2": "4637.04",
+          "leverage": "none",
+          "order": "buy 0.01300000 ETHUSD @ trailing stop 4647.04 -> limit 4637.04",
+          "close": ""
+        },
+        "vol": "0.01300000",
+        "vol_exec": "0.01300000",
+        "cost": "60.28152",
+        "fee": "0.15070",
+        "price": "4637.04",
+        "stopprice": "4647.32000",
+        "limitprice": "4547.04000",
+        "misc": "stopped",
+        "oflags": "fciq",
+        "trades": [
+          "TA2OS3-4IZOM-HKTII6"
+        ],
+        "reason": null,
+        "closetm": 1756127721.212157
+      },
+      "OUWOMC-TGM2Y-MZ4WKF": {
+        "refid": null,
+        "userref": 0,
+        "status": "closed",
+        "opentm": 1756083705.915952,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "sell",
+          "ordertype": "trailing-stop-limit",
+          "price": "4674.13",
+          "price2": "4664.13",
+          "leverage": "none",
+          "order": "sell 0.03488601 ETHUSD @ trailing stop 4674.13 -> limit 4664.13",
+          "close": ""
+        },
+        "vol": "0.03488601",
+        "vol_exec": "0.03488601",
+        "cost": "163.09210",
+        "fee": "0.65237",
+        "price": "4675.00",
+        "stopprice": "4673.79000",
+        "limitprice": "4774.13000",
+        "misc": "stopped",
+        "oflags": "fcib",
+        "trades": [
+          "TY4RN6-ILFNM-U2P36D"
+        ],
+        "trigger": "index",
+        "reason": null,
+        "closetm": 1756102642.026698
+      }
+    },
+    "count": 5
+  }
+}

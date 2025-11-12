@@ -1,0 +1,91 @@
+{
+  "error": [],
+  "result": {
+    "open": {
+      "O35IXY-DBXRP-4TFSY6": {
+        "refid": null,
+        "userref": 0,
+        "status": "open",
+        "opentm": 1756164168.737321,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "sell",
+          "ordertype": "limit",
+          "price": "4800.00",
+          "price2": "0",
+          "leverage": "none",
+          "order": "sell 0.01300000 ETHUSD @ limit 4800.00",
+          "close": ""
+        },
+        "vol": "0.01300000",
+        "vol_exec": "0.00000000",
+        "cost": "0.00000",
+        "fee": "0.00000",
+        "price": "0.00000",
+        "stopprice": "0.00000",
+        "limitprice": "0.00000",
+        "misc": "",
+        "oflags": "fcib"
+      },
+      "O3TBR3-QTDWI-BBIPJC": {
+        "refid": null,
+        "userref": 0,
+        "status": "open",
+        "opentm": 1756063180.980785,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "sell",
+          "ordertype": "limit",
+          "price": "5200.00",
+          "price2": "0",
+          "leverage": "none",
+          "order": "sell 0.01365993 ETHUSD @ limit 5200.00",
+          "close": ""
+        },
+        "vol": "0.01365993",
+        "vol_exec": "0.00000000",
+        "cost": "0.00000",
+        "fee": "0.00000",
+        "price": "0.00000",
+        "stopprice": "0.00000",
+        "limitprice": "0.00000",
+        "misc": "",
+        "oflags": "fcib"
+      },
+      "OXRGU6-CRWJ6-AWEBAN": {
+        "refid": null,
+        "userref": 0,
+        "status": "open",
+        "opentm": 1756063114.325379,
+        "starttm": 0,
+        "expiretm": 0,
+        "descr": {
+          "pair": "ETHUSD",
+          "aclass": "forex",
+          "type": "sell",
+          "ordertype": "limit",
+          "price": "5050.00",
+          "price2": "0",
+          "leverage": "none",
+          "order": "sell 0.02731985 ETHUSD @ limit 5050.00",
+          "close": ""
+        },
+        "vol": "0.02731985",
+        "vol_exec": "0.00000000",
+        "cost": "0.00000",
+        "fee": "0.00000",
+        "price": "0.00000",
+        "stopprice": "0.00000",
+        "limitprice": "0.00000",
+        "misc": "",
+        "oflags": "fcib"
+      }
+    }
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "error": [],
+  "result": {
+    "ADA": {
+      "aclass": "currency",
+      "altname": "ADA",
+      "decimals": 8,
+      "display_decimals": 6,
+      "status": "enabled"
+    },
+    "ADA.S": {
+      "aclass": "currency",
+      "altname": "ADA.S",
+      "decimals": 8,
+      "display_decimals": 6,
+      "status": "enabled"
+    },
+    "ADA.F": {
+      "aclass": "currency",
+      "altname": "ADA.F",
+      "decimals": 8,
+      "display_decimals": 6,
+      "status": "enabled"
+    },
+    "DOT": {
+      "aclass": "currency",
+      "altname": "DOT",
+      "decimals": 10,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "DOT.S": {
+      "aclass": "currency",
+      "altname": "DOT.S",
+      "decimals": 10,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "DOT.F": {
+      "aclass": "currency",
+      "altname": "DOT.F",
+      "decimals": 10,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "ETH.F": {
+      "aclass": "currency",
+      "altname": "ETH.F",
+      "decimals": 8,
+      "display_decimals": 6,
+      "status": "enabled"
+    },
+    "ETHW": {
+      "aclass": "currency",
+      "altname": "ETHW",
+      "decimals": 8,
+      "display_decimals": 6,
+      "status": "enabled"
+    },
+    "LINK": {
+      "aclass": "currency",
+      "altname": "LINK",
+      "decimals": 10,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "SC": {
+      "aclass": "currency",
+      "altname": "SC",
+      "decimals": 10,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "XXDG": {
+      "aclass": "currency",
+      "altname": "XDG",
+      "decimals": 8,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "XXBT": {
+      "aclass": "currency",
+      "altname": "XBT",
+      "decimals": 10,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "XETH": {
+      "aclass": "currency",
+      "altname": "ETH",
+      "decimals": 10,
+      "display_decimals": 5,
+      "status": "enabled"
+    },
+    "ZUSD": {
+      "aclass": "currency",
+      "altname": "USD",
+      "decimals": 4,
+      "display_decimals": 2,
+      "status": "enabled"
+    },
+    "ZEUR": {
+      "aclass": "currency",
+      "altname": "EUR",
+      "decimals": 4,
+      "display_decimals": 2,
+      "status": "enabled"
+    }
+  }
+}

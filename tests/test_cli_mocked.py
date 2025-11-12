@@ -1,0 +1,190 @@
+"""
+CLI integration tests that exercise commands with mocked Kraken API responses.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from contextlib import ExitStack
+from pathlib import Path
+from typing import Any, Dict
+from unittest import TestCase
+from unittest.mock import patch
+
+from click.testing import CliRunner
+
+# Ensure Config sees credentials when module is imported.
+os.environ.setdefault("KRAKEN_API_KEY", "TESTKEY123")
+os.environ.setdefault("KRAKEN_API_SECRET", "TESTSECRET123")
+os.environ.setdefault("KRAKEN_SANDBOX", "true")
+
+import kraken_cli  # noqa: E402
+from api.kraken_client import KrakenAPIClient  # noqa: E402
+
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
+def load_fixture(name: str) -> Dict[str, Any]:
+    """Return fixture content as a dictionary."""
+    path = FIXTURE_DIR / name
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _ticker_response_for_pair(pair: str) -> Dict[str, Any]:
+    """Return a ticker payload matching the requested pair."""
+    # Use the live ETHUSD payload for market command coverage.
+    if "ETH" in pair and "ETHW" not in pair:
+        return load_fixture("ticker_ethusd.json")
+
+    price_map = {
+        "ADA": 0.25,
+        "DOT": 5.50,
+        "ETHW": 10.75,
+        "LINK": 14.10,
+        "SC": 0.01,
+        "XDG": 0.10,
+        "XXDG": 0.10,
+        "XBT": 68000.0,
+    }
+
+    target_key = next(
+        (key for key in price_map if key in pair),
+        None,
+    )
+
+    if target_key is None:
+        return {"error": [], "result": {}}
+
+    price = price_map[target_key]
+    return {
+        "error": [],
+        "result": {
+            pair: {
+                "c": [f"{price:.8f}", ""],
+                "h": ["0", "0"],
+                "l": ["0", "0"],
+                "p": ["0", "0"],
+                "v": ["0", "0"],
+                "b": ["0", "0"],
+                "a": ["0", "0"],
+            }
+        },
+    }
+
+
+class KrakenCliMockedTests(TestCase):
+    """Exercise CLI commands using captured Kraken fixtures."""
+
+    def setUp(self) -> None:
+        self.runner = CliRunner()
+        self.balance_fixture = load_fixture("account_balance.json")
+        self.asset_info_fixture = load_fixture("asset_info.json")
+        self.open_orders_fixture = load_fixture("open_orders.json")
+        self.open_positions_fixture = load_fixture("open_positions.json")
+        self.closed_orders_fixture = load_fixture("closed_orders.json")
+        self.trade_history_fixture = load_fixture("trade_history.json")
+
+    def _mock_api(self) -> ExitStack:
+        """Patch Kraken API methods with fixture-backed responses."""
+        stack = ExitStack()
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_account_balance",
+                return_value=self.balance_fixture,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_asset_info",
+                return_value=self.asset_info_fixture,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_open_positions",
+                return_value=self.open_positions_fixture,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_open_orders",
+                return_value=self.open_orders_fixture,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_closed_orders",
+                return_value=self.closed_orders_fixture,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_trade_history",
+                return_value=self.trade_history_fixture,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_ticker",
+                side_effect=_ticker_response_for_pair,
+            )
+        )
+        return stack
+
+    def test_portfolio_command_renders_assets(self) -> None:
+        """Portfolio command should present balances using mocked data."""
+        with self._mock_api():
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                ["portfolio"],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("💼 Portfolio Overview", result.output)
+        self.assertIn("Asset Balances", result.output)
+        self.assertIn("XXDG", result.output)
+        self.assertIn("ZUSD", result.output)
+        self.assertIn("Total Portfolio Value", result.output)
+
+    def test_ticker_command_uses_alternate_pair_keys(self) -> None:
+        """Ticker command should display Rich panel with mocked payload."""
+        with patch.object(
+            KrakenAPIClient,
+            "get_ticker",
+            return_value=load_fixture("ticker_ethusd.json"),
+        ):
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                ["ticker", "-p", "ETHUSD"],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Market Data", result.output)
+        self.assertIn("Last Price", result.output)
+        self.assertIn("24h High", result.output)
+
+    def test_orders_command_surfaces_open_orders(self) -> None:
+        """Orders command should summarise open orders via fixtures."""
+        with self._mock_api():
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                ["orders", "--verbose"],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Open Orders", result.output)
+        self.assertIn("ETHUSD", result.output)
+        self.assertIn("0.01300000", result.output)
