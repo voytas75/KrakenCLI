@@ -9,11 +9,12 @@ Updates: v0.9.4 - 2025-11-12 - Added withdrawal and export management commands.
 """
 
 import click
+import importlib
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple, List
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -56,11 +57,98 @@ AUTO_CONTROL_DIR = Path("logs/auto_trading")
 RISK_STATE_FILE = AUTO_CONTROL_DIR / "risk_state.json"
 AUTO_STATUS_FILE = AUTO_CONTROL_DIR / "status.json"
 
+_OPTIONAL_DEPENDENCIES: Tuple[Tuple[str, str], ...] = (
+    ("pandas", "Required for automated trading engine and indicator calculations."),
+    ("pandas_ta", "Extends indicator coverage (optional)."),
+    ("talib", "Native TA-Lib acceleration (optional)."),
+)
+
 
 def _get_active_log_level() -> str:
     """Return the currently configured logging level name."""
     level = logging.getLogger().getEffectiveLevel()
     return logging.getLevelName(level)
+
+
+def _dependency_status(module_name: str) -> Tuple[bool, Optional[str]]:
+    """Return availability status and optional error message for a module."""
+    try:
+        importlib.import_module(module_name)
+        return True, None
+    except Exception as exc:  # pragma: no cover - import errors vary by platform
+        return False, str(exc)
+
+
+def _render_diagnostics(console: Console, config_obj: Config) -> None:
+    """Display environment and dependency diagnostics."""
+    summary = Table(title="Diagnostics Summary", show_lines=False, expand=False)
+    summary.add_column("Check", style="cyan", no_wrap=True)
+    summary.add_column("Status", style="green")
+    summary.add_column("Details", style="white")
+
+    credentials_ok = config_obj.has_credentials()
+    credentials_valid = config_obj.validate_credentials()
+
+    summary.add_row(
+        "API Credentials",
+        "✅" if credentials_ok else "⚠️",
+        "Configured" if credentials_ok else "Missing (.env or environment variables)",
+    )
+    summary.add_row(
+        "Credential Format",
+        "✅" if credentials_valid else ("⚠️" if credentials_ok else "ℹ️"),
+        "Looks valid" if credentials_valid else "Key/secret length appears invalid",
+    )
+    summary.add_row(
+        "Sandbox Mode",
+        "✅" if config_obj.is_sandbox() else "ℹ️",
+        "Sandbox enabled" if config_obj.is_sandbox() else "Live mode (ensure dry-run when testing)",
+    )
+    summary.add_row(
+        "Public Rate Limit",
+        "ℹ️",
+        f"{config_obj.get_public_rate_limit():.2f} req/sec",
+    )
+    summary.add_row(
+        "Private Rate Limit",
+        "ℹ️",
+        f"{config_obj.get_private_rate_limit_per_min():.2f} req/min",
+    )
+    env_path = Path(".env")
+    summary.add_row(
+        ".env File",
+        "✅" if env_path.exists() else "⚠️",
+        str(env_path.resolve()),
+    )
+
+    console.print(summary)
+
+    deps_table = Table(title="Optional Dependencies", show_lines=False, expand=False)
+    deps_table.add_column("Module", style="magenta")
+    deps_table.add_column("Status", style="green")
+    deps_table.add_column("Notes", style="white")
+
+    for module_name, description in _OPTIONAL_DEPENDENCIES:
+        available, error = _dependency_status(module_name)
+        status = "✅ Available" if available else "⚠️ Missing"
+        note = description if available else (error or description)
+        deps_table.add_row(module_name, status, note)
+
+    console.print(deps_table)
+
+    guidance = Panel.fit(
+        "\n".join(
+            [
+                "[bold yellow]Next Steps[/bold yellow]",
+                "• Install missing optional dependencies for full automation support.",
+                "• Populate `.env` with API credentials if not already set.",
+                "• Adjust `KRAKEN_PUBLIC_RATE_LIMIT` / `KRAKEN_PRIVATE_RATE_LIMIT_PER_MIN` as needed.",
+            ]
+        ),
+        title="Guidance",
+        border_style="yellow",
+    )
+    console.print(guidance)
 
 
 def _convert_to_kraken_asset(currency_code: str) -> str:
@@ -440,8 +528,18 @@ def config_setup():
     console.print("[yellow]⚠️  Keep your API credentials secure and never share them![/yellow]")
 
 @cli.command()
-def info():
+@click.option(
+    "--diagnostics",
+    is_flag=True,
+    help="Display environment and optional dependency checks.",
+)
+@click.pass_context
+def info(ctx: click.Context, diagnostics: bool):
     """Show application information and warnings"""
+    if diagnostics:
+        _render_diagnostics(console, config)
+        return
+
     log_level_line = f"[bold white]Current Log Level:[/bold white] [cyan]{_get_active_log_level()}[/cyan]"
     panel = Panel.fit(
         "[bold cyan]Kraken Pro Trading CLI[/bold cyan]\n\n"

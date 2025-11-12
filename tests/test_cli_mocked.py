@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict
@@ -22,6 +22,7 @@ os.environ.setdefault("KRAKEN_SANDBOX", "true")
 
 import kraken_cli  # noqa: E402
 from api.kraken_client import KrakenAPIClient  # noqa: E402
+from cli import export as export_commands  # noqa: E402
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -87,6 +88,29 @@ class KrakenCliMockedTests(TestCase):
         self.open_positions_fixture = load_fixture("open_positions.json")
         self.closed_orders_fixture = load_fixture("closed_orders.json")
         self.trade_history_fixture = load_fixture("trade_history.json")
+
+    @contextmanager
+    def _temporary_export_dir(self, path: Path):
+        """Temporarily re-register export command with custom output directory."""
+        kraken_cli.cli.commands.pop("export-report", None)
+        export_commands.register(
+            kraken_cli.cli,
+            console=kraken_cli.console,
+            config=kraken_cli.config,
+            call_with_retries=kraken_cli._call_with_retries,
+            export_output_dir=path,
+        )
+        try:
+            yield
+        finally:
+            kraken_cli.cli.commands.pop("export-report", None)
+            export_commands.register(
+                kraken_cli.cli,
+                console=kraken_cli.console,
+                config=kraken_cli.config,
+                call_with_retries=kraken_cli._call_with_retries,
+                export_output_dir=kraken_cli.EXPORT_OUTPUT_DIR,
+            )
 
     def _mock_api(self) -> ExitStack:
         """Patch Kraken API methods with fixture-backed responses."""
@@ -366,7 +390,7 @@ class KrakenCliMockedTests(TestCase):
         """Export retrieval should write archive to configured output directory."""
 
         with TemporaryDirectory() as tmpdir, \
-                patch.object(kraken_cli, "EXPORT_OUTPUT_DIR", Path(tmpdir)), \
+                self._temporary_export_dir(Path(tmpdir)), \
                 patch.object(
                     KrakenAPIClient,
                     "retrieve_export",
@@ -396,7 +420,7 @@ class KrakenCliMockedTests(TestCase):
         side_effects = [Exception("temporary failure"), (b"binary-data", {})]
 
         with TemporaryDirectory() as tmpdir, \
-                patch.object(kraken_cli, "EXPORT_OUTPUT_DIR", Path(tmpdir)), \
+                self._temporary_export_dir(Path(tmpdir)), \
                 patch("kraken_cli.time.sleep", return_value=None), \
                 patch.object(
                     KrakenAPIClient,
@@ -416,3 +440,24 @@ class KrakenCliMockedTests(TestCase):
         self.assertEqual(result.exit_code, 0, msg=result.output)
         self.assertIn("Export saved to", result.output)
         self.assertEqual(retrieve_mock.call_count, 2)
+
+    def test_info_diagnostics_option(self) -> None:
+        """Info command should provide diagnostics output and dependency status."""
+
+        def _import_side_effect(module_name: str):
+            if module_name == "pandas":
+                return object()
+            raise ImportError("module not installed")
+
+        with patch("kraken_cli.importlib.import_module", side_effect=_import_side_effect):
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                ["info", "--diagnostics"],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Diagnostics Summary", result.output)
+        self.assertIn("Optional Dependencies", result.output)
+        self.assertIn("pandas_ta", result.output)
+        self.assertIn("talib", result.output)
