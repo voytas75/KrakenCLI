@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import unittest
 from typing import Any, Dict, Optional
+from unittest import mock
 
 from portfolio.portfolio_manager import PortfolioManager
 
@@ -46,8 +47,14 @@ class FakeKrakenClient:
     def get_open_positions(self) -> Dict[str, Any]:
         return {"result": {}}
 
-    def get_open_orders(self) -> Dict[str, Any]:
+    def get_open_orders(self, force_refresh: bool = False) -> Dict[str, Any]:
         return {"result": {}}
+
+    def clear_open_orders_cache(self) -> None:
+        return None
+
+    def clear_ledgers_cache(self) -> None:
+        return None
 
     def get_trade_history(self, trades: bool = True, start: Optional[str] = None,
                           end: Optional[str] = None) -> Dict[str, Any]:
@@ -119,6 +126,40 @@ class PortfolioManagerValuationTests(unittest.TestCase):
         doge_calls = [pair for pair in self.fake_client.ticker_calls if "DG" in pair]
         self.assertLessEqual(len(ada_calls), 2)
         self.assertLessEqual(len(doge_calls), 3)
+
+
+class PortfolioManagerRefreshTests(unittest.TestCase):
+    """Ensure portfolio refresh mechanics drive Kraken client cache invalidation."""
+
+    def test_refresh_portfolio_clears_client_and_local_caches(self) -> None:
+        api_client = mock.Mock()
+        portfolio = PortfolioManager(api_client=api_client)
+
+        portfolio._asset_price_by_symbol["ETH"] = 2000.0
+        portfolio._price_cache["XETHZUSD"] = 2000.0
+        portfolio._failed_price_assets.add("UNKNOWN")
+
+        portfolio.refresh_portfolio()
+
+        api_client.clear_open_orders_cache.assert_called_once_with()
+        api_client.clear_ledgers_cache.assert_called_once_with()
+        self.assertEqual(portfolio._asset_price_by_symbol, {})
+        self.assertEqual(portfolio._price_cache, {})
+        self.assertEqual(portfolio._failed_price_assets, set())
+
+    def test_get_portfolio_summary_refresh_forces_api_refresh(self) -> None:
+        api_client = mock.Mock()
+        api_client.get_account_balance.return_value = {"result": {}}
+        api_client.get_open_positions.return_value = {"result": {}}
+        api_client.get_open_orders.return_value = {"result": {}}
+
+        portfolio = PortfolioManager(api_client=api_client)
+
+        with mock.patch.object(portfolio, "refresh_portfolio") as refresh_mock:
+            portfolio.get_portfolio_summary(refresh=True)
+
+        refresh_mock.assert_called_once_with()
+        api_client.get_open_orders.assert_called_once_with(force_refresh=True)
 
 
 if __name__ == "__main__":

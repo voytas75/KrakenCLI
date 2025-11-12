@@ -740,7 +740,7 @@ def orders(ctx, status, trades, verbose):
                 console.print("[yellow]No trade history found[/yellow]")
         else:
             console.print("[bold blue]📋 Fetching open orders...[/bold blue]")
-            orders_data = portfolio.get_open_orders()
+            orders_data = portfolio.get_open_orders(refresh=True)
             
             if orders_data:
                 if verbose:
@@ -1006,7 +1006,7 @@ def portfolio(ctx, pair):
         console.print("[bold blue]💼 Portfolio Overview[/bold blue]")
         
         # Get balances
-        summary = portfolio.get_portfolio_summary()
+        summary = portfolio.get_portfolio_summary(refresh=True)
         asset_rows = summary.get('significant_assets', []) if summary else []
         
         if asset_rows:

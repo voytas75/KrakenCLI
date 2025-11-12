@@ -1,5 +1,7 @@
 """
-Portfolio management for Kraken trading
+Portfolio management for Kraken trading.
+
+Updates: v0.9.4 - 2025-11-12 - Added cache refresh helpers for order and ledger data.
 """
 
 import logging
@@ -35,6 +37,21 @@ class PortfolioManager:
             logger.debug("Failed to load asset metadata: %s", exc)
         finally:
             self._asset_info_loaded = True
+
+    def refresh_portfolio(self) -> None:
+        """Invalidate cached Kraken responses and local price caches."""
+
+        clear_orders = getattr(self.api_client, "clear_open_orders_cache", None)
+        if callable(clear_orders):
+            clear_orders()
+
+        clear_ledgers = getattr(self.api_client, "clear_ledgers_cache", None)
+        if callable(clear_ledgers):
+            clear_ledgers()
+
+        self._asset_price_by_symbol.clear()
+        self._price_cache.clear()
+        self._failed_price_assets.clear()
 
     @staticmethod
     def _strip_suffixes(asset: str) -> str:
@@ -181,10 +198,10 @@ class PortfolioManager:
             logger.error(f"Failed to get trade balance: {str(e)}")
             return None
     
-    def get_open_orders(self) -> Dict[str, Any]:
-        """Get all open orders"""
+    def get_open_orders(self, refresh: bool = False) -> Dict[str, Any]:
+        """Get all open orders, optionally forcing an API refresh."""
         try:
-            result = self.api_client.get_open_orders()
+            result = self.api_client.get_open_orders(force_refresh=refresh)
             if result and 'result' in result:
                 return result['result']
             return {}
@@ -286,12 +303,15 @@ class PortfolioManager:
             logger.error(f"Failed to calculate total USD value: {str(e)}")
             return None
     
-    def get_portfolio_summary(self) -> Dict[str, Any]:
-        """Get comprehensive portfolio summary"""
+    def get_portfolio_summary(self, refresh: bool = False) -> Dict[str, Any]:
+        """Get comprehensive portfolio summary."""
+
+        if refresh:
+            self.refresh_portfolio()
         try:
             balances = self.get_balances()
             positions = self.get_open_positions()
-            orders = self.get_open_orders()
+            orders = self.get_open_orders(refresh=refresh)
             total_value = 0.0
             
             # Count significant assets

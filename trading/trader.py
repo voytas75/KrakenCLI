@@ -1,5 +1,7 @@
 """
-Trading functionality for Kraken API
+Trading functionality for Kraken API.
+
+Updates: v0.9.4 - 2025-11-12 - Added cache refresh helper for order and ledger data.
 """
 
 import logging
@@ -14,7 +16,18 @@ class Trader:
     
     def __init__(self, api_client: KrakenAPIClient):
         self.api_client = api_client
-        
+
+    def refresh_state(self) -> None:
+        """Clear cached Kraken responses to ensure up-to-date trading state."""
+
+        clear_orders = getattr(self.api_client, "clear_open_orders_cache", None)
+        if callable(clear_orders):
+            clear_orders()
+
+        clear_ledgers = getattr(self.api_client, "clear_ledgers_cache", None)
+        if callable(clear_ledgers):
+            clear_ledgers()
+
     def place_order(
         self,
         pair: str,

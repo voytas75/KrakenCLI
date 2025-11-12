@@ -137,6 +137,17 @@ class KrakenClientEndpointTests(unittest.TestCase):
             "private/DeleteExport", data={"id": "REPORT-ID"}, auth_required=True
         )
 
+    def test_public_cache_clear_helpers_delegate_to_private_methods(self) -> None:
+        client = _build_client()
+
+        with mock.patch.object(client, "_invalidate_orders_cache") as orders_mock:
+            client.clear_open_orders_cache()
+        orders_mock.assert_called_once_with()
+
+        with mock.patch.object(client, "_clear_ledgers_cache") as ledgers_mock:
+            client.clear_ledgers_cache()
+        ledgers_mock.assert_called_once_with()
+
 
 if __name__ == "__main__":  # pragma: no cover - manual invocation helper
     unittest.main()

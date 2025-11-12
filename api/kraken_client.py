@@ -115,6 +115,20 @@ class KrakenAPIClient:
         with self._cache_lock:
             self._ledgers_cache.clear()
 
+    # ------------------------------------------------------------------
+    # Cache management public helpers
+    # ------------------------------------------------------------------
+
+    def clear_open_orders_cache(self) -> None:
+        """Public helper to clear cached open order payloads."""
+
+        self._invalidate_orders_cache()
+
+    def clear_ledgers_cache(self) -> None:
+        """Public helper to clear cached ledger payloads."""
+
+        self._clear_ledgers_cache()
+
     @staticmethod
     def _normalise_assets_input(assets: Optional[Union[str, Sequence[str]]]) -> Optional[str]:
         """Normalise asset filters to the comma-separated format required by Kraken."""
