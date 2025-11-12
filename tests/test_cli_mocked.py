@@ -188,3 +188,143 @@ class KrakenCliMockedTests(TestCase):
         self.assertIn("Open Orders", result.output)
         self.assertIn("ETHUSD", result.output)
         self.assertIn("0.01300000", result.output)
+
+    def test_withdraw_command_requires_confirmation(self) -> None:
+        """Withdraw command should confirm before submitting requests."""
+
+        with patch.object(
+            KrakenAPIClient,
+            "request_withdrawal",
+            return_value={"result": {"refid": "WD123"}},
+        ) as withdraw_mock:
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                [
+                    "withdraw",
+                    "--asset",
+                    "ZUSD",
+                    "--key",
+                    "Primary",
+                    "--amount",
+                    "1.50",
+                ],
+                input="y\n",
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Withdrawal submitted successfully", result.output)
+        withdraw_mock.assert_called_once_with(
+            asset="ZUSD",
+            key="Primary",
+            amount="1.50",
+            address=None,
+            otp=None,
+        )
+
+    def test_withdraw_status_lists_entries(self) -> None:
+        """Withdraw command should list status entries when --status is used."""
+
+        status_payload = {
+            "result": [
+                {
+                    "refid": "WD123",
+                    "status": "Success",
+                    "amount": "1.50",
+                    "fee": "0.10",
+                    "method": "Bank",
+                    "info": "Completed",
+                }
+            ]
+        }
+
+        with patch.object(
+            KrakenAPIClient,
+            "get_withdraw_status",
+            return_value=status_payload,
+        ) as status_mock:
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                [
+                    "withdraw",
+                    "--asset",
+                    "ZUSD",
+                    "--status",
+                ],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Withdrawal Status", result.output)
+        self.assertIn("WD123", result.output)
+        status_mock.assert_called_once_with(asset="ZUSD", method=None, start=None)
+
+    def test_export_report_creates_job(self) -> None:
+        """Export command should submit new jobs after confirmation."""
+
+        with patch.object(
+            KrakenAPIClient,
+            "request_export",
+            return_value={"result": {"id": "EXP123", "status": "processing"}},
+        ) as export_mock:
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                [
+                    "export-report",
+                    "--report",
+                    "ledgers",
+                    "--description",
+                    "Monthly ledger",
+                    "--field",
+                    "txid",
+                    "--field",
+                    "fee",
+                    "--confirm",
+                ],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Export job submitted", result.output)
+        export_mock.assert_called_once_with(
+            report="ledgers",
+            description="Monthly ledger",
+            export_format="CSV",
+            fields=["txid", "fee"],
+            start=None,
+            end=None,
+        )
+
+    def test_export_report_status_lists_jobs(self) -> None:
+        """Export command should display job status when requested."""
+
+        status_payload = {
+            "result": [
+                {
+                    "id": "EXP123",
+                    "report": "ledgers",
+                    "status": "processing",
+                    "descr": "Monthly ledger",
+                    "created": "1700000000",
+                }
+            ]
+        }
+
+        with patch.object(
+            KrakenAPIClient,
+            "get_export_status",
+            return_value=status_payload,
+        ) as status_mock:
+            result = self.runner.invoke(
+                kraken_cli.cli,
+                [
+                    "export-report",
+                    "--status",
+                ],
+                catch_exceptions=False,
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Export Job Status", result.output)
+        self.assertIn("EXP123", result.output)
+        status_mock.assert_called_once_with(report=None)

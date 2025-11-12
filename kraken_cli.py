@@ -5,6 +5,7 @@ Professional cryptocurrency trading interface for Kraken exchange
 
 Updates: v0.9.0 - 2025-11-11 - Added automated trading engine commands and integrations.
 Updates: v0.9.3 - 2025-11-12 - Added risk alert management commands and logging integration.
+Updates: v0.9.4 - 2025-11-12 - Added withdrawal and export management commands.
 """
 
 import click
@@ -12,8 +13,9 @@ import json
 import os
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -890,6 +892,341 @@ def cancel(ctx, cancel_all, txid):
             
     except Exception as e:
         console.print(f"[red]❌ Error cancelling order: {str(e)}[/red]")
+
+
+@cli.command()
+@click.option('--asset', '-a', required=True, help='Kraken asset code for the withdrawal (e.g., ZUSD)')
+@click.option('--key', '-k', help='Withdrawal key configured in Kraken security settings')
+@click.option('--amount', '-n', help='Amount to withdraw')
+@click.option('--address', help='Override withdrawal address when supported')
+@click.option('--otp', help='Two-factor token when required by account security settings')
+@click.option('--method', help='Filter withdrawal method for status lookups')
+@click.option('--start', help='Unix timestamp to filter withdrawal status results')
+@click.option('--status', is_flag=True, help='Display recent withdrawal status instead of submitting a new request')
+@click.option('--confirm', is_flag=True, help='Skip interactive confirmation prompts')
+@click.pass_context
+def withdraw(ctx, asset, key, amount, address, otp, method, start, status, confirm):
+    """Submit Kraken withdrawals or inspect recent withdrawal status."""
+
+    api_client = ctx.obj.get('api_client')
+
+    if api_client is None:
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+
+        try:
+            api_client = KrakenAPIClient(
+                api_key=config.api_key,
+                api_secret=config.api_secret,
+                sandbox=config.sandbox
+            )
+        except Exception as exc:
+            console.print(f"[red]❌ Failed to initialize API client: {exc}[/red]")
+            return
+
+    asset_code = asset.upper()
+
+    if status:
+        console.print("[bold blue]🔍 Fetching withdrawal status...[/bold blue]")
+        try:
+            response = api_client.get_withdraw_status(asset=asset_code, method=method, start=start)
+        except Exception as exc:
+            console.print(f"[red]❌ Failed to fetch withdrawal status: {exc}[/red]")
+            return
+
+        entries: List[Dict[str, Any]]
+        raw_result = response.get('result') if isinstance(response, dict) else None
+        if isinstance(raw_result, list):
+            entries = [entry for entry in raw_result if isinstance(entry, dict)]
+        elif isinstance(raw_result, dict):
+            entries = [payload for payload in raw_result.values() if isinstance(payload, dict)]
+        else:
+            entries = []
+
+        if not entries:
+            console.print("[yellow]ℹ️  No withdrawal records found for the selected filters.[/yellow]")
+            return
+
+        table = Table(title="Withdrawal Status", show_lines=False)
+        table.add_column("RefID", style="cyan")
+        table.add_column("Status", style="green")
+        table.add_column("Amount", justify="right")
+        table.add_column("Fee", justify="right")
+        table.add_column("Method", style="magenta")
+        table.add_column("Info", style="yellow")
+
+        for entry in entries:
+            table.add_row(
+                str(entry.get('refid', 'N/A')),
+                str(entry.get('status', 'N/A')),
+                str(entry.get('amount', 'N/A')),
+                str(entry.get('fee', '0')),
+                str(entry.get('method', 'N/A')),
+                str(entry.get('info', '')),
+            )
+
+        console.print(table)
+        return
+
+    if not key:
+        console.print("[red]❌ Withdrawal key (--key) is required when submitting a withdrawal.[/red]")
+        return
+
+    if amount is None:
+        console.print("[red]❌ Withdrawal amount (--amount) is required.[/red]")
+        return
+
+    try:
+        amount_decimal = Decimal(str(amount))
+    except (InvalidOperation, TypeError):
+        console.print("[red]❌ Withdrawal amount must be a valid numeric value.[/red]")
+        return
+
+    if amount_decimal <= 0:
+        console.print("[red]❌ Withdrawal amount must be greater than zero.[/red]")
+        return
+
+    summary_table = Table.grid(padding=(0, 1))
+    summary_table.add_column(justify="right", style="cyan")
+    summary_table.add_column(style="white")
+    summary_table.add_row("Asset", asset_code)
+    summary_table.add_row("Amount", str(amount_decimal))
+    summary_table.add_row("Key", key)
+    summary_table.add_row("Address", address or "(default)")
+    summary_table.add_row("Sandbox", "Yes" if config.sandbox else "No")
+
+    console.print(
+        Panel(
+            summary_table,
+            title="Withdrawal Confirmation",
+            border_style="yellow",
+        )
+    )
+
+    if not confirm:
+        proceed = click.confirm("Submit withdrawal request?", default=False)
+        if not proceed:
+            console.print("[yellow]ℹ️  Withdrawal cancelled by user.[/yellow]")
+            return
+
+    try:
+        response = api_client.request_withdrawal(
+            asset=asset_code,
+            key=key,
+            amount=str(amount_decimal),
+            address=address,
+            otp=otp,
+        )
+    except Exception as exc:
+        console.print(f"[red]❌ Withdrawal request failed: {exc}[/red]")
+        return
+
+    result_payload = response.get('result') if isinstance(response, dict) else None
+    refid = None
+    if isinstance(result_payload, dict):
+        refid = result_payload.get('refid') or result_payload.get('txid')
+
+    if refid:
+        console.print(f"[green]✅ Withdrawal submitted successfully (refid: {refid})[/green]")
+    else:
+        console.print("[green]✅ Withdrawal submitted successfully.[/green]")
+
+    if isinstance(result_payload, dict) and result_payload:
+        details = Table(title="Withdrawal Result", show_lines=False)
+        details.add_column("Field", style="cyan")
+        details.add_column("Value", style="white")
+        for field, value in result_payload.items():
+            details.add_row(str(field), str(value))
+        console.print(details)
+
+
+@cli.command(name="export-report")
+@click.option('--report', '-r', help='Kraken report type (ledgers, trades, margin, etc.)')
+@click.option('--description', '-d', help='Description for the export job')
+@click.option('--format', 'export_format', type=click.Choice(['CSV', 'TSV', 'JSON'], case_sensitive=False), default='CSV', show_default=True, help='Export format')
+@click.option('--field', 'fields', multiple=True, help='Optional field to include (repeatable)')
+@click.option('--start', help='Unix timestamp for export start window')
+@click.option('--end', help='Unix timestamp for export end window')
+@click.option('--status', is_flag=True, help='List export job status (optionally filter by --report)')
+@click.option('--retrieve-id', help='Retrieve details for a specific export job ID')
+@click.option('--delete-id', help='Delete a completed export job by ID')
+@click.option('--confirm', is_flag=True, help='Skip confirmation when creating a new export job')
+@click.pass_context
+def export_report(ctx, report, description, export_format, fields, start, end, status, retrieve_id, delete_id, confirm):
+    """Manage Kraken export jobs for ledgers, trades, and other reports."""
+
+    api_client = ctx.obj.get('api_client')
+
+    if api_client is None:
+        if not config.has_credentials():
+            console.print("[red]⚠️  API credentials not configured![/red]")
+            console.print("[yellow]Please configure your Kraken API credentials in .env file[/yellow]")
+            console.print("[yellow]See README.md for setup instructions[/yellow]")
+            return
+
+        try:
+            api_client = KrakenAPIClient(
+                api_key=config.api_key,
+                api_secret=config.api_secret,
+                sandbox=config.sandbox
+            )
+        except Exception as exc:
+            console.print(f"[red]❌ Failed to initialize API client: {exc}[/red]")
+            return
+
+    actions_selected = sum(
+        action is True for action in (
+            status,
+        )
+    ) + sum(
+        action is not None for action in (
+            retrieve_id,
+            delete_id,
+        )
+    )
+
+    if actions_selected > 1:
+        console.print("[red]❌ Please choose only one action: create, --status, --retrieve-id, or --delete-id.[/red]")
+        return
+
+    if status:
+        console.print("[bold blue]🔍 Fetching export job status...[/bold blue]")
+        try:
+            response = api_client.get_export_status(report=report)
+        except Exception as exc:
+            console.print(f"[red]❌ Failed to fetch export status: {exc}[/red]")
+            return
+
+        jobs_raw = response.get('result') if isinstance(response, dict) else None
+        if isinstance(jobs_raw, list):
+            jobs = [job for job in jobs_raw if isinstance(job, dict)]
+        elif isinstance(jobs_raw, dict):
+            jobs = [payload for payload in jobs_raw.values() if isinstance(payload, dict)]
+        else:
+            jobs = []
+
+        if not jobs:
+            console.print("[yellow]ℹ️  No export jobs found.[/yellow]")
+            return
+
+        table = Table(title="Export Job Status", show_lines=False)
+        table.add_column("ID", style="cyan")
+        table.add_column("Report", style="green")
+        table.add_column("Status", style="yellow")
+        table.add_column("Description", style="white")
+        table.add_column("Created", style="magenta")
+
+        for job in jobs:
+            table.add_row(
+                str(job.get('id', 'N/A')),
+                str(job.get('report', 'N/A')),
+                str(job.get('status', 'N/A')),
+                str(job.get('descr', job.get('description', ''))),
+                str(job.get('created', job.get('createdtm', ''))),
+            )
+
+        console.print(table)
+        return
+
+    if retrieve_id:
+        console.print(f"[bold blue]🔍 Retrieving export job {retrieve_id}...[/bold blue]")
+        try:
+            response = api_client.retrieve_export(report_id=retrieve_id)
+        except Exception as exc:
+            console.print(f"[red]❌ Failed to retrieve export: {exc}[/red]")
+            return
+
+        payload = response.get('result') if isinstance(response, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            console.print("[yellow]ℹ️  No data returned for the specified export job.[/yellow]")
+            return
+
+        details = Table(title="Export Retrieval", show_lines=False)
+        details.add_column("Field", style="cyan")
+        details.add_column("Value", style="white")
+        for field, value in payload.items():
+            details.add_row(str(field), str(value))
+        console.print(details)
+        return
+
+    if delete_id:
+        console.print(f"[bold yellow]⚠️  Deleting export job {delete_id}...[/bold yellow]")
+        try:
+            response = api_client.delete_export(report_id=delete_id)
+        except Exception as exc:
+            console.print(f"[red]❌ Failed to delete export: {exc}[/red]")
+            return
+
+        result_payload = response.get('result') if isinstance(response, dict) else None
+        if isinstance(result_payload, dict) and result_payload.get('result') == 'success':
+            console.print("[green]✅ Export job deleted successfully.[/green]")
+        else:
+            console.print("[green]✅ Delete request submitted.[/green]")
+        return
+
+    if not report:
+        console.print("[red]❌ Report type (--report) is required when creating an export job.[/red]")
+        return
+
+    job_description = description or f"CLI export for {report}"
+
+    summary_table = Table.grid(padding=(0, 1))
+    summary_table.add_column(justify="right", style="cyan")
+    summary_table.add_column(style="white")
+    summary_table.add_row("Report", report)
+    summary_table.add_row("Format", export_format.upper())
+    summary_table.add_row("Description", job_description)
+    summary_table.add_row("Fields", ", ".join(fields) if fields else "(all)")
+    summary_table.add_row("Start", start or "(none)")
+    summary_table.add_row("End", end or "(none)")
+
+    console.print(
+        Panel(
+            summary_table,
+            title="Export Job Confirmation",
+            border_style="yellow",
+        )
+    )
+
+    if not confirm:
+        proceed = click.confirm("Submit export job?", default=False)
+        if not proceed:
+            console.print("[yellow]ℹ️  Export job cancelled by user.[/yellow]")
+            return
+
+    try:
+        response = api_client.request_export(
+            report=report,
+            description=job_description,
+            export_format=export_format.upper(),
+            fields=list(fields) if fields else None,
+            start=start,
+            end=end,
+        )
+    except Exception as exc:
+        console.print(f"[red]❌ Failed to submit export job: {exc}[/red]")
+        return
+
+    payload = response.get('result') if isinstance(response, dict) else None
+    job_id = None
+    if isinstance(payload, dict):
+        job_id = payload.get('id')
+
+    if job_id:
+        console.print(f"[green]✅ Export job submitted (id: {job_id}).[/green]")
+    else:
+        console.print("[green]✅ Export job submitted successfully.[/green]")
+
+    if isinstance(payload, dict) and payload:
+        details = Table(title="Export Job Details", show_lines=False)
+        details.add_column("Field", style="cyan")
+        details.add_column("Value", style="white")
+        for field, value in payload.items():
+            details.add_row(str(field), str(value))
+        console.print(details)
 
 @cli.command()
 @click.option('--pairs', is_flag=True, help='Show available trading pairs')

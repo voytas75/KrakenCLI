@@ -219,6 +219,8 @@ Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and 
 | `order` | Validate or execute an order (dry-run by default) | `python kraken_cli.py order --pair ETHUSD --side buy --order-type limit --volume 0.5 --price 2500` |
 | `orders` | View open orders or trade history (`--trades`) | `python kraken_cli.py orders --trades` |
 | `cancel` | Cancel a specific order (`--txid`) or all (`--cancel-all`) | `python kraken_cli.py cancel --txid OABC123` |
+| `withdraw` | Submit withdrawals or inspect status (`--status`) | `python kraken_cli.py withdraw --asset ZUSD --key Primary --amount 25 --confirm` |
+| `export-report` | Manage Kraken export jobs (create/status/retrieve/delete) | `python kraken_cli.py export-report --report ledgers --description "Monthly" --confirm` |
 | `portfolio` | Summarise balances, USD valuations, and open positions | `python kraken_cli.py portfolio` |
 | `config-setup` | Interactive `.env` generator | `python kraken_cli.py config-setup` |
 | `risk-alerts` | Enable/disable alert notifications or inspect status | `python kraken_cli.py risk-alerts --status` |
