@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Trader balance validation tests for Kraken asset prefixes.
 - Configurable endpoint weights feeding the API client rate limiter.
 - Kraken API client unit tests and coverage utilities for config/rate limiter paths.
+- Additional CLI coverage targeting trading, portfolio, and export command flows.
 
 ### Changed
 - `run_tests.sh` now runs coverage and fails when overall coverage falls below 80%.

@@ -19,8 +19,12 @@ python -m coverage run \
   tests/test_trader_balance_validation.py \
   tests/test_config_endpoint_weights.py \
   tests/test_utils_helpers.py \
+  tests/test_utils_logger.py \
   tests/test_portfolio_manager.py \
   tests/test_trading_engine.py \
+  tests/test_cli_trading_extra.py \
+  tests/test_cli_export_extra.py \
+  tests/test_cli_portfolio_extra.py \
   tests/test_cli_mocked.py
 
 python -m coverage report --fail-under=80
