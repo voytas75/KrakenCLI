@@ -24,6 +24,7 @@ class PortfolioManager:
         self._asset_pairs_loaded: bool = False
         self._asset_pairs_by_key: Dict[Tuple[str, str], List[str]] = {}
         self._known_pair_identifiers: Set[str] = set()
+        self._pair_display_cache: Dict[Tuple[str, str], str] = {}
 
     def _load_asset_metadata(self) -> None:
         """Load asset metadata and cache alt names for price lookups."""
@@ -84,6 +85,10 @@ class PortfolioManager:
             bucket[:] = deduped
             self._known_pair_identifiers.update(deduped)
 
+            display_value = wsname or altname or pair_name
+            if display_value:
+                self._pair_display_cache[key] = str(display_value)
+
         self._asset_pairs_loaded = True
 
     def refresh_portfolio(self) -> None:
@@ -103,6 +108,7 @@ class PortfolioManager:
         self._asset_pairs_loaded = False
         self._asset_pairs_by_key.clear()
         self._known_pair_identifiers.clear()
+        self._pair_display_cache.clear()
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -244,6 +250,26 @@ class PortfolioManager:
             self._price_cache[pair] = None
 
         return None
+
+    def get_pair_display(self, asset: str, quote: str = "USD") -> Optional[str]:
+        """Return a human readable pair name for the asset/quote combination."""
+
+        self._load_asset_pairs()
+        key = (
+            self._normalize_asset_symbol(asset.upper()),
+            self._normalize_asset_symbol(quote.upper()),
+        )
+        display = self._pair_display_cache.get(key)
+        if display:
+            return display
+
+        pairs = self._asset_pairs_by_key.get(key, [])
+        if pairs:
+            return pairs[0]
+
+        normalized_asset = self._normalize_asset_symbol(asset)
+        normalized_quote = self._normalize_asset_symbol(quote)
+        return f"{normalized_asset}/{normalized_quote}"
         
     def get_balances(self) -> Dict[str, str]:
         """Get all account balances"""

@@ -20,6 +20,9 @@ class _StubPortfolio:
     def get_open_positions(self):
         return self.positions
 
+    def get_pair_display(self, asset: str, quote: str = "USD"):
+        return f"{asset}/{quote}"
+
 
 def _install_portfolio(monkeypatch, portfolio_instance):
     monkeypatch.setattr("kraken_cli.PortfolioManager", lambda *args, **kwargs: portfolio_instance)
@@ -59,6 +62,7 @@ def test_portfolio_command_handles_missing_assets(monkeypatch) -> None:
     assert "Total Portfolio Value" in result.output
     assert "No USD pricing available" in result.output
     assert "Open Positions" in result.output
+    assert "XXBT/USD" in result.output
     assert "Fee status unavailable" in result.output
 
 

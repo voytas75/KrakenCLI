@@ -250,6 +250,7 @@ def register(
             if asset_rows:
                 table = Table(title="Asset Balances")
                 table.add_column("Asset", style="cyan")
+                table.add_column("Pair", style="yellow")
                 table.add_column("Amount", justify="right", style="green")
                 table.add_column("USD Value", justify="right", style="blue")
 
@@ -269,7 +270,9 @@ def register(
                     amount_text = format_asset_amount(amount_float, asset_code)
                     usd_text = format_currency(usd_value, decimals=2) if usd_value is not None else "N/A"
 
-                    table.add_row(asset_code, amount_text, usd_text)
+                    pair_display = portfolio_manager.get_pair_display(asset_code, "USD")
+
+                    table.add_row(asset_code, pair_display, amount_text, usd_text)
 
                 console.print(table)
 
