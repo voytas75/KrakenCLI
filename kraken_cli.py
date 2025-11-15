@@ -8,6 +8,7 @@ Updates: v0.9.3 - 2025-11-12 - Added risk alert management commands and logging 
 Updates: v0.9.4 - 2025-11-12 - Added withdrawal and export management commands.
 Updates: v0.9.5 - 2025-11-15 - Added Kraken system status check to status command.
 Updates: v0.9.6 - 2025-11-15 - Surface raw balance API payload in debug mode.
+Updates: v0.9.7 - 2025-11-15 - Display exact balance strings without rounding.
 """
 
 import click
@@ -35,7 +36,6 @@ from api.kraken_client import KrakenAPIClient
 from trading.trader import Trader
 from portfolio.portfolio_manager import PortfolioManager
 from utils.logger import setup_logging
-from utils.helpers import format_currency
 
 from cli import automation as automation_commands
 from cli import export as export_commands
@@ -459,11 +459,11 @@ def status(ctx):
             table.add_column("Balance", style="green")
             
             for asset, balance_str in balance_data.items():
-                # Kraken returns balances as strings, not dictionaries
+                # Kraken returns balances as strings, not dictionaries; display raw value for clarity
                 if float(balance_str) > 0:
                     table.add_row(
                         asset,
-                        format_currency(balance_str)
+                        str(balance_str)
                     )
             
             console.print(table)
