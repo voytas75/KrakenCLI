@@ -89,7 +89,7 @@ def test_portfolio_summary_calculates_usd_values() -> None:
     assert summary["total_assets"] == 2
     assert summary["fee_status"]["currency"] == "ZUSD"
     assert summary["fee_status"]["maker_fee"] == 0.16
-    assert summary["fee_status"]["pair"] == "XXBT/ZUSD"
+    assert summary["fee_status"]["pair"] == "XBTUSD"
     assert summary["fee_status_raw"] == summary["fee_status"]["raw_response"]
     assert manager.api_client.trade_volume_requests
     first_request = manager.api_client.trade_volume_requests[0]

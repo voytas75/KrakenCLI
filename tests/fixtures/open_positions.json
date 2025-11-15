@@ -1,4 +1,17 @@
 {
   "error": [],
-  "result": {}
+  "result": {
+    "OXY123": {
+      "ordertxid": "OXY123",
+      "pair": "ETH/USD",
+      "time": 1700000000,
+      "type": "long",
+      "vol": "1.00000000",
+      "cost": "3000.0",
+      "fee": "4.5",
+      "margin": "150",
+      "value": "3100.0",
+      "net": "100"
+    }
+  }
 }

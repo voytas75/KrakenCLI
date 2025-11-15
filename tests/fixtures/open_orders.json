@@ -10,7 +10,7 @@
         "starttm": 0,
         "expiretm": 0,
         "descr": {
-          "pair": "ETHUSD",
+          "pair": "ETH/USD",
           "aclass": "forex",
           "type": "sell",
           "ordertype": "limit",
@@ -38,7 +38,7 @@
         "starttm": 0,
         "expiretm": 0,
         "descr": {
-          "pair": "ETHUSD",
+          "pair": "ETH/USD",
           "aclass": "forex",
           "type": "sell",
           "ordertype": "limit",
@@ -66,7 +66,7 @@
         "starttm": 0,
         "expiretm": 0,
         "descr": {
-          "pair": "ETHUSD",
+          "pair": "ETH/USD",
           "aclass": "forex",
           "type": "sell",
           "ordertype": "limit",

@@ -5,6 +5,7 @@ Updates: v0.9.4 - 2025-11-12 - Added cache refresh helpers for order and ledger 
 Updates: v0.9.5 - 2025-11-15 - Surface raw fee status responses for debug consumers.
 Updates: v0.9.6 - 2025-11-16 - Preserve raw balance amounts in portfolio summaries.
 Updates: v0.9.7 - 2025-11-17 - Validate fee status pairs against Kraken AssetPairs metadata.
+Updates: v0.9.8 - 2025-11-17 - Prefer altname labels for displayed trading pairs.
 """
 
 import logging
@@ -29,6 +30,7 @@ class PortfolioManager:
         self._known_pair_identifiers: Set[str] = set()
         self._pair_display_cache: Dict[Tuple[str, str], str] = {}
         self._pair_identifier_map: Dict[str, str] = {}
+        self._pair_canonical_to_alt: Dict[str, str] = {}
 
     def _load_asset_metadata(self) -> None:
         """Load asset metadata and cache alt names for price lookups."""
@@ -91,7 +93,8 @@ class PortfolioManager:
             bucket[:] = deduped
             self._known_pair_identifiers.update(deduped)
 
-            canonical_payload = canonical_pair or (str(altname).upper() if altname else None)
+            alt_upper = str(altname).upper() if altname else None
+            canonical_payload = canonical_pair or alt_upper
             if canonical_payload:
                 compact_canonical = canonical_payload.replace('/', '')
             else:
@@ -106,9 +109,13 @@ class PortfolioManager:
                 else:
                     self._pair_identifier_map.setdefault(normalized_alias, normalized_alias)
 
-            display_value = wsname or altname or pair_name
-            if display_value:
-                self._pair_display_cache[key] = str(display_value)
+            if compact_canonical and alt_upper:
+                self._pair_canonical_to_alt[compact_canonical] = alt_upper
+
+            if altname:
+                self._pair_display_cache[key] = str(altname)
+            elif canonical_pair:
+                self._pair_display_cache[key] = canonical_pair
 
         self._asset_pairs_loaded = True
 
@@ -131,6 +138,7 @@ class PortfolioManager:
         self._known_pair_identifiers.clear()
         self._pair_display_cache.clear()
         self._pair_identifier_map.clear()
+        self._pair_canonical_to_alt.clear()
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -272,6 +280,24 @@ class PortfolioManager:
 
         return self._dedupe_preserve_order(filtered)
 
+    def _format_pair_label(self, pair_identifier: Optional[str]) -> Optional[str]:
+        """Return Kraken altname for the provided canonical identifier when possible."""
+
+        if not pair_identifier:
+            return None
+
+        self._load_asset_pairs()
+        normalized = self._normalize_pair_identifier(pair_identifier)
+        altname = self._pair_canonical_to_alt.get(normalized)
+        if altname:
+            return altname
+
+        if '/' in pair_identifier:
+            compact = pair_identifier.replace('/', '')
+            return self._pair_canonical_to_alt.get(compact, compact)
+
+        return pair_identifier.upper()
+
     def _get_price_for_pairs(self, candidate_pairs: List[str]) -> Optional[float]:
         """Attempt to find a USD price for the provided pair candidates."""
         for pair in candidate_pairs:
@@ -317,16 +343,19 @@ class PortfolioManager:
             self._normalize_asset_symbol(quote.upper()),
         )
         display = self._pair_display_cache.get(key)
-        if display:
-            return display
+        formatted_display = self._format_pair_label(display)
+        if formatted_display:
+            return formatted_display
 
         pairs = self._asset_pairs_by_key.get(key, [])
-        if pairs:
-            return pairs[0]
+        for candidate in pairs:
+            formatted = self._format_pair_label(candidate)
+            if formatted:
+                return formatted
 
         normalized_asset = self._normalize_asset_symbol(asset)
         normalized_quote = self._normalize_asset_symbol(quote)
-        return f"{normalized_asset}/{normalized_quote}"
+        return f"{normalized_asset}{normalized_quote}".upper()
         
     def get_balances(self) -> Dict[str, str]:
         """Get all account balances"""
@@ -597,13 +626,12 @@ class PortfolioManager:
         next_volume = self._to_float(taker_entry.get('nextvolume')) if taker_entry else None
         tier_volume = self._to_float(taker_entry.get('tiervolume')) if taker_entry else None
 
-        if pair_key and '/' not in pair_key and len(pair_key) >= 6:
-            pair_key = f"{pair_key[:-4]}/{pair_key[-4:]}"
+        pair_label = self._format_pair_label(pair_key)
 
         return {
             'currency': currency,
             'thirty_day_volume': volume,
-            'pair': pair_key or ','.join(candidate_pairs) if candidate_pairs else None,
+            'pair': pair_label or (','.join(candidate_pairs) if candidate_pairs else None),
             'maker_fee': maker_fee,
             'taker_fee': taker_fee,
             'next_fee': next_fee,
