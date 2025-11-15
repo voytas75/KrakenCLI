@@ -21,6 +21,8 @@ class PortfolioManager:
         self._asset_price_by_symbol: Dict[str, Optional[float]] = {}
         self._price_cache: Dict[str, Optional[float]] = {}
         self._failed_price_assets: Set[str] = set()
+        self._asset_pairs_loaded: bool = False
+        self._asset_pairs_by_key: Dict[Tuple[str, str], List[str]] = {}
 
     def _load_asset_metadata(self) -> None:
         """Load asset metadata and cache alt names for price lookups."""
@@ -38,6 +40,60 @@ class PortfolioManager:
         finally:
             self._asset_info_loaded = True
 
+    def _load_asset_pairs(self) -> None:
+        """Fetch tradable asset pairs and index by normalised base/quote."""
+        if self._asset_pairs_loaded:
+            return
+
+        try:
+            response = self.api_client.get_asset_pairs()
+        except Exception as exc:
+            logger.debug("Failed to load asset pairs: %s", exc)
+            self._asset_pairs_loaded = True
+            return
+
+        pairs = response.get('result', {}) if isinstance(response, dict) else {}
+        for pair_name, payload in pairs.items():
+            if not isinstance(payload, dict):
+                continue
+
+            base_code = str(payload.get('base', '')).upper()
+            quote_code = str(payload.get('quote', '')).upper()
+            if not base_code or not quote_code:
+                continue
+
+            base_norm = self._normalize_asset_symbol(base_code)
+            quote_norm = self._normalize_asset_symbol(quote_code)
+            key = (base_norm, quote_norm)
+            bucket = self._asset_pairs_by_key.setdefault(key, [])
+
+            names: List[str] = []
+            altname = payload.get('altname')
+            wsname = payload.get('wsname')
+            if altname:
+                names.append(str(altname))
+            names.append(pair_name)
+            if wsname:
+                names.append(str(wsname))
+
+            def _ensure_variants(value: str) -> None:
+                value = value.strip()
+                if not value:
+                    return
+                names.append(value)
+                cleaned = value.replace('/', '')
+                if '/' not in value and len(cleaned) >= 6:
+                    midpoint = len(cleaned) // 2
+                    names.append(f"{cleaned[:midpoint]}/{cleaned[midpoint:]}")
+
+            for name in list(names):
+                _ensure_variants(name.upper())
+                _ensure_variants(name)
+
+            bucket[:] = self._dedupe_preserve_order(bucket + names)
+
+        self._asset_pairs_loaded = True
+
     def refresh_portfolio(self) -> None:
         """Invalidate cached Kraken responses and local price caches."""
 
@@ -52,6 +108,8 @@ class PortfolioManager:
         self._asset_price_by_symbol.clear()
         self._price_cache.clear()
         self._failed_price_assets.clear()
+        self._asset_pairs_loaded = False
+        self._asset_pairs_by_key.clear()
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -117,6 +175,7 @@ class PortfolioManager:
         base_upper = (base or "").upper()
         quote_upper = (quote or "").upper()
 
+        self._load_asset_pairs()
         core_base = self._strip_suffixes(base_upper)
         base_variants = [
             core_base,
@@ -149,6 +208,13 @@ class PortfolioManager:
                 compact = f"{base_candidate}{quote_candidate}"
                 pairs.append(slash)
                 pairs.append(compact)
+
+        norm_key = (
+            self._normalize_asset_symbol(base_upper),
+            self._normalize_asset_symbol(quote_upper),
+        )
+        mapped = self._asset_pairs_by_key.get(norm_key, [])
+        pairs.extend(mapped)
 
         return self._dedupe_preserve_order(pairs)
 
