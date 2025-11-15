@@ -54,6 +54,15 @@ class PortfolioManager:
         self._failed_price_assets.clear()
 
     @staticmethod
+    def _to_float(value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _strip_suffixes(asset: str) -> str:
         """Remove common Kraken suffixes such as .S or .F."""
         normalized = asset.split('.')[0]
@@ -313,6 +322,7 @@ class PortfolioManager:
             positions = self.get_open_positions()
             orders = self.get_open_orders(refresh=refresh)
             total_value = 0.0
+            fee_status = self.get_fee_status()
             
             # Count significant assets
             significant_assets = []
@@ -352,6 +362,7 @@ class PortfolioManager:
                 'open_orders_count': len(orders),
                 'total_assets': len(balances),
                 'missing_assets': missing_valuations,
+                'fee_status': fee_status,
             }
         except Exception as e:
             logger.error(f"Failed to get portfolio summary: {str(e)}")
@@ -362,7 +373,51 @@ class PortfolioManager:
                 'open_orders_count': 0,
                 'total_assets': 0,
                 'missing_assets': [],
+                'fee_status': {},
             }
+
+    def get_fee_status(self) -> Dict[str, Any]:
+        """Return parsed 30-day volume and fee tier information."""
+
+        try:
+            response = self.api_client.get_trade_volume(include_fee_info=True)
+        except Exception as exc:
+            logger.debug("Failed to fetch trade volume for fee status: %s", exc)
+            return {}
+
+        if not isinstance(response, dict):
+            return {}
+
+        result = response.get('result', {}) if isinstance(response.get('result'), dict) else {}
+
+        currency = result.get('currency')
+        volume = self._to_float(result.get('volume'))
+
+        fees = result.get('fees') if isinstance(result.get('fees'), dict) else {}
+        fees_maker = result.get('fees_maker') if isinstance(result.get('fees_maker'), dict) else {}
+
+        def _first_fee_entry(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            for entry in payload.values():
+                if isinstance(entry, dict):
+                    return entry
+            return None
+
+        taker_entry = _first_fee_entry(fees)
+        maker_entry = _first_fee_entry(fees_maker) or taker_entry
+
+        maker_fee = self._to_float(maker_entry.get('fee')) if maker_entry else None
+        taker_fee = self._to_float(taker_entry.get('fee')) if taker_entry else None
+        next_fee = self._to_float(taker_entry.get('nextfee')) if taker_entry else None
+        next_volume = self._to_float(taker_entry.get('nextvolume')) if taker_entry else None
+
+        return {
+            'currency': currency,
+            'thirty_day_volume': volume,
+            'maker_fee': maker_fee,
+            'taker_fee': taker_fee,
+            'next_fee': next_fee,
+            'next_volume': next_volume,
+        }
     
     def get_performance_metrics(self, days: int = 30) -> Dict[str, Any]:
         """Calculate basic performance metrics"""

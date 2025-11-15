@@ -47,6 +47,7 @@ Kraken Pro Trading CLI is a Python 3.12+ application that interacts with the 202
 - Portfolio command aggregates balances, USD valuations, and open position snapshots.
 - Automatic normalization maps staked/future asset tickers (e.g., `ADA.S`, `XXDG`) to tradable symbols and caches USD pricing.
 - Built-in sanity checks still flag any assets that lack reference pricing without breaking execution.
+- Displays 30-day trade volume and current maker/taker fees, including the next fee tier threshold when available.
 - Rate limiting helpers and consistent API response handling guard against throttling penalties.
 
 ### Operational Tooling

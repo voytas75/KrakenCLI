@@ -42,6 +42,7 @@ def test_portfolio_command_handles_missing_assets(monkeypatch) -> None:
         ],
         "total_usd_value": 6500.0,
         "missing_assets": ["FANTOM"],
+        "fee_status": {},
     }
     positions = {
         "XBTUSD": {"type": "long", "vol": "0.1", "net": "250"},
@@ -72,6 +73,7 @@ def test_portfolio_command_save_snapshot(monkeypatch, tmp_path) -> None:
         "open_positions_count": 0,
         "open_orders_count": 0,
         "total_assets": 1,
+        "fee_status": {},
     }
 
     portfolio_stub = _StubPortfolio(summary, positions={})
@@ -103,6 +105,7 @@ def test_portfolio_command_compare_snapshot(monkeypatch, tmp_path) -> None:
         "open_positions_count": 0,
         "open_orders_count": 0,
         "total_assets": 1,
+        "fee_status": {},
     }
 
     snapshot_summary = {
@@ -114,6 +117,7 @@ def test_portfolio_command_compare_snapshot(monkeypatch, tmp_path) -> None:
         "open_positions_count": 0,
         "open_orders_count": 0,
         "total_assets": 1,
+        "fee_status": {},
     }
 
     snapshot_path = tmp_path / "snapshot.json"
@@ -134,3 +138,38 @@ def test_portfolio_command_compare_snapshot(monkeypatch, tmp_path) -> None:
     assert "Portfolio Comparison" in result.output
     assert "+USD 200.00" in result.output
     assert "+0.01" in result.output
+
+
+def test_portfolio_command_displays_fee_status(monkeypatch) -> None:
+    runner = CliRunner()
+
+    summary = {
+        "significant_assets": [
+            {"asset": "XXBT", "amount": "0.10", "usd_value": 6200.0},
+        ],
+        "total_usd_value": 6200.0,
+        "missing_assets": [],
+        "open_positions_count": 0,
+        "open_orders_count": 0,
+        "total_assets": 1,
+        "fee_status": {
+            "currency": "ZUSD",
+            "thirty_day_volume": 1500.5,
+            "maker_fee": 0.0015,
+            "taker_fee": 0.0020,
+            "next_fee": 0.0010,
+            "next_volume": 50000,
+        },
+    }
+
+    portfolio_stub = _StubPortfolio(summary, positions={})
+
+    _install_api_client(monkeypatch)
+    _install_portfolio(monkeypatch, portfolio_stub)
+
+    result = runner.invoke(kraken_cli.cli, ["portfolio"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "Fee Status" in result.output
+    assert "0.1500%" in result.output
+    assert "USD 1,500.50" in result.output

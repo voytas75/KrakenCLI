@@ -111,10 +111,10 @@ def register(
         except (TypeError, ValueError):
             return None
 
-    def _format_currency_value(value: Optional[float]) -> str:
+    def _format_currency_value(value: Optional[float], *, currency: str = "USD") -> str:
         if value is None:
             return "N/A"
-        return format_currency(value, decimals=2)
+        return format_currency(value, currency=currency, decimals=2)
 
     def _format_currency_delta(delta: Optional[float]) -> str:
         if delta is None:
@@ -129,6 +129,11 @@ def register(
             return "0"
         sign = "+" if delta > 0 else "-"
         return f"{sign}{format_asset_amount(abs(delta), asset)}"
+
+    def _format_fee_percent(value: Optional[float]) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value * 100:.4f}%"
 
     def _assets_index(summary: Dict[str, Any]) -> Dict[str, Dict[str, Optional[float]]]:
         index: Dict[str, Dict[str, Optional[float]]] = {}
@@ -278,6 +283,36 @@ def register(
                 if missing_assets:
                     formatted_missing = ", ".join(sorted(set(missing_assets)))
                     console.print(f"[yellow]⚠️  No USD pricing available for: {formatted_missing}[/yellow]")
+
+            fee_status = summary.get("fee_status") if summary else {}
+            if fee_status:
+                console.print("\n[bold blue]Fee Status[/bold blue]")
+                fee_table = Table()
+                fee_table.add_column("Metric", style="cyan")
+                fee_table.add_column("Value", justify="right", style="green")
+
+                currency_raw = str(fee_status.get("currency") or "USD")
+                currency_display = currency_raw[1:] if currency_raw.startswith("Z") and len(currency_raw) > 1 else currency_raw
+
+                volume_value = _safe_float(fee_status.get("thirty_day_volume"))
+                maker_value = _safe_float(fee_status.get("maker_fee"))
+                taker_value = _safe_float(fee_status.get("taker_fee"))
+                next_fee_value = _safe_float(fee_status.get("next_fee"))
+                next_volume_value = _safe_float(fee_status.get("next_volume"))
+
+                volume_text = _format_currency_value(volume_value, currency=currency_display)
+                maker_text = _format_fee_percent(maker_value)
+                taker_text = _format_fee_percent(taker_value)
+                next_fee_text = _format_fee_percent(next_fee_value)
+                next_volume_text = _format_currency_value(next_volume_value, currency=currency_display)
+
+                fee_table.add_row("30-day Volume", volume_text)
+                fee_table.add_row("Maker Fee", maker_text)
+                fee_table.add_row("Taker Fee", taker_text)
+                fee_table.add_row("Next Fee Tier", next_fee_text)
+                fee_table.add_row("Volume For Next Tier", next_volume_text)
+
+                console.print(fee_table)
 
             if save and summary:
                 snapshot_path = _write_snapshot(summary)

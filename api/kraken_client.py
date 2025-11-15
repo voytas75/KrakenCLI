@@ -311,6 +311,25 @@ class KrakenAPIClient:
         """Get trade balance"""
         data = {'asset': asset}
         return self._make_request("private/TradeBalance", data, auth_required=True)
+
+    def get_trade_volume(
+        self,
+        pair: Optional[Union[str, Sequence[str]]] = None,
+        *,
+        include_fee_info: bool = True,
+    ) -> Dict[str, Any]:
+        """Return rolling 30-day trade volume and fee tier details."""
+
+        payload: Dict[str, Any] = {}
+        if pair:
+            if isinstance(pair, str):
+                payload['pair'] = pair
+            else:
+                payload['pair'] = ",".join(str(item) for item in pair if item)
+        if include_fee_info:
+            payload['fee-info'] = 'true'
+
+        return self._make_request("private/TradeVolume", payload, auth_required=True)
     
     def get_ticker(self, pair: str) -> Dict[str, Any]:
         """Get ticker information"""

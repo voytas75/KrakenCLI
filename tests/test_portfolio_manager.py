@@ -36,6 +36,20 @@ class _StubApiClient:
     def get_closed_orders(self, trades: bool = True) -> Dict[str, Any]:
         return {"result": {"closed": {"1": {"vol": "0.1"}}}}
 
+    def get_trade_volume(self, pair=None, include_fee_info: bool = True) -> Dict[str, Any]:
+        return {
+            "result": {
+                "currency": "ZUSD",
+                "volume": "1500.5",
+                "fees": {
+                    "XXBTZUSD": {"fee": "0.002", "minfee": "0.001", "nextfee": "0.0025", "nextvolume": "200000"}
+                },
+                "fees_maker": {
+                    "XXBTZUSD": {"fee": "0.0015", "minfee": "0.001", "nextfee": "0.0010", "nextvolume": "50000"}
+                },
+            }
+        }
+
 
 def test_portfolio_summary_calculates_usd_values() -> None:
     manager = PortfolioManager(api_client=_StubApiClient())
@@ -45,6 +59,8 @@ def test_portfolio_summary_calculates_usd_values() -> None:
     assert summary["open_positions_count"] == 1
     assert summary["open_orders_count"] == 1  # underlying open dict counts as 1 entry
     assert summary["total_assets"] == 2
+    assert summary["fee_status"]["currency"] == "ZUSD"
+    assert summary["fee_status"]["maker_fee"] == 0.0015
 
 
 def test_refresh_portfolio_resets_price_cache() -> None:
@@ -91,6 +107,10 @@ def test_portfolio_helpers_expose_balances_and_history() -> None:
     assert performance["total_trades"] == 1
 
     assert manager.get_usd_value("UNKNOWN", 1.0) is not None
+
+    fee_status = manager.get_fee_status()
+    assert fee_status["maker_fee"] == 0.0015
+    assert fee_status["thirty_day_volume"] == 1500.5
 
 
 def test_portfolio_helper_pair_building() -> None:
