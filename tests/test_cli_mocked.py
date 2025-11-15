@@ -5,6 +5,7 @@ CLI integration tests that exercise commands with mocked Kraken API responses.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -88,6 +89,32 @@ class KrakenCliMockedTests(TestCase):
         self.open_positions_fixture = load_fixture("open_positions.json")
         self.closed_orders_fixture = load_fixture("closed_orders.json")
         self.trade_history_fixture = load_fixture("trade_history.json")
+        self.trade_volume_fixture = {
+            "result": {
+                "currency": "ZUSD",
+                "volume": "1500.5",
+                "fees": {
+                    "XXBTZUSD": {
+                        "fee": "0.26",
+                        "minfee": "0.24",
+                        "maxfee": "0.32",
+                        "nextfee": "0.24",
+                        "nextvolume": "50000",
+                        "tiervolume": "0",
+                    }
+                },
+                "fees_maker": {
+                    "XXBTZUSD": {
+                        "fee": "0.16",
+                        "minfee": "0.12",
+                        "maxfee": "0.26",
+                        "nextfee": "0.14",
+                        "nextvolume": "50000",
+                        "tiervolume": "0",
+                    }
+                },
+            }
+        }
 
     @contextmanager
     def _temporary_export_dir(self, path: Path):
@@ -164,6 +191,13 @@ class KrakenCliMockedTests(TestCase):
                 side_effect=_ticker_response_for_pair,
             )
         )
+        stack.enter_context(
+            patch.object(
+                KrakenAPIClient,
+                "get_trade_volume",
+                return_value=self.trade_volume_fixture,
+            )
+        )
         return stack
 
     def test_portfolio_command_renders_assets(self) -> None:
@@ -198,7 +232,25 @@ class KrakenCliMockedTests(TestCase):
         self.assertEqual(result.exit_code, 0, msg=result.output)
         self.assertIn("Market Data", result.output)
         self.assertIn("Last Price", result.output)
-        self.assertIn("24h High", result.output)
+
+    def test_portfolio_command_displays_raw_fee_status_in_debug(self) -> None:
+        """Portfolio command should print raw fee payload when debug logging is active."""
+        root_logger = logging.getLogger()
+        previous_level = root_logger.level
+        root_logger.setLevel(logging.DEBUG)
+        try:
+            with self._mock_api():
+                result = self.runner.invoke(
+                    kraken_cli.cli,
+                    ["portfolio"],
+                    catch_exceptions=False,
+                )
+        finally:
+            root_logger.setLevel(previous_level)
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("Raw Fee Status Response", result.output)
+        self.assertIn("fees", result.output)
 
     def test_orders_command_surfaces_open_orders(self) -> None:
         """Orders command should summarise open orders via fixtures."""

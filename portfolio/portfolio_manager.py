@@ -2,10 +2,11 @@
 Portfolio management for Kraken trading.
 
 Updates: v0.9.4 - 2025-11-12 - Added cache refresh helpers for order and ledger data.
+Updates: v0.9.5 - 2025-11-15 - Surface raw fee status responses for debug consumers.
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from api.kraken_client import KrakenAPIClient
 
 logger = logging.getLogger(__name__)
@@ -450,6 +451,11 @@ class PortfolioManager:
             if not unique_pairs:
                 unique_pairs = ["XXBTZUSD"]
             fee_status = self.get_fee_status(unique_pairs)
+            raw_fee_status = (
+                fee_status.get('raw_response')
+                if isinstance(fee_status, dict)
+                else None
+            )
 
             return {
                 'total_usd_value': total_usd_value,
@@ -459,6 +465,7 @@ class PortfolioManager:
                 'total_assets': len(balances),
                 'missing_assets': missing_valuations,
                 'fee_status': fee_status,
+                'fee_status_raw': raw_fee_status,
             }
         except Exception as e:
             logger.error(f"Failed to get portfolio summary: {str(e)}")
@@ -470,6 +477,7 @@ class PortfolioManager:
                 'total_assets': 0,
                 'missing_assets': [],
                 'fee_status': {},
+                'fee_status_raw': None,
             }
 
     def get_fee_status(self, candidate_pairs: Optional[Sequence[str]] = None) -> Dict[str, Any]:
@@ -490,10 +498,12 @@ class PortfolioManager:
             response = self.api_client.get_trade_volume(pair=payload_pairs, include_fee_info=True)
         except Exception as exc:
             logger.debug("Failed to fetch trade volume for fee status: %s", exc)
-            return {}
+            return {'raw_response': None}
+
+        raw_response: Any = response
 
         if not isinstance(response, dict):
-            return {}
+            return {'raw_response': raw_response}
 
         result = response.get('result', {}) if isinstance(response.get('result'), dict) else {}
 
@@ -540,6 +550,7 @@ class PortfolioManager:
             'next_fee': next_fee,
             'next_volume': next_volume,
             'tier_volume': tier_volume,
+            'raw_response': raw_response,
         }
     
     def get_performance_metrics(self, days: int = 30) -> Dict[str, Any]:

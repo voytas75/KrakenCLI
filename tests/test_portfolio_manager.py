@@ -78,6 +78,7 @@ def test_portfolio_summary_calculates_usd_values() -> None:
     assert summary["fee_status"]["currency"] == "ZUSD"
     assert summary["fee_status"]["maker_fee"] == 0.16
     assert summary["fee_status"]["pair"] == "XXBT/ZUSD"
+    assert summary["fee_status_raw"] == summary["fee_status"]["raw_response"]
     assert manager.api_client.trade_volume_requests
     first_request = manager.api_client.trade_volume_requests[0]
     assert isinstance(first_request, list)
@@ -132,6 +133,7 @@ def test_portfolio_helpers_expose_balances_and_history() -> None:
     fee_status = manager.get_fee_status()
     assert fee_status["maker_fee"] == 0.16
     assert fee_status["thirty_day_volume"] == 1500.5
+    assert fee_status["raw_response"]
 
 
 def test_portfolio_helper_pair_building() -> None:

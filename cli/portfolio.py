@@ -5,6 +5,7 @@ This module encapsulates the ``portfolio`` command that displays balances and
 open positions using Rich tables.
 
 Updates: v0.9.8 - 2025-11-15 - Added snapshot save and comparison options.
+Updates: v0.9.9 - 2025-11-15 - Print raw fee status payload when debug logging is active.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Any, Callable, Dict, Optional
 
 import click
 from rich.console import Console
+from rich.pretty import Pretty
 from rich.table import Table
 
 from api.kraken_client import KrakenAPIClient
@@ -322,6 +324,11 @@ def register(
                 fee_table.add_row("Volume For Next Tier", next_volume_text)
 
                 console.print(fee_table)
+                if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
+                    raw_payload = summary.get("fee_status_raw") if summary else None
+                    if raw_payload is not None:
+                        console.print("\n[dim]Raw Fee Status Response[/dim]")
+                        console.print(Pretty(raw_payload))
             elif fee_status == {}:
                 console.print(
                     "[yellow]ℹ️  Fee status unavailable (Kraken did not return fee data for this account or pair set).[/yellow]"
