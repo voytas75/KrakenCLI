@@ -5,7 +5,7 @@ Updates: v0.9.4 - 2025-11-12 - Added cache refresh helpers for order and ledger 
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Sequence, Set
 from api.kraken_client import KrakenAPIClient
 
 logger = logging.getLogger(__name__)
@@ -322,7 +322,7 @@ class PortfolioManager:
             positions = self.get_open_positions()
             orders = self.get_open_orders(refresh=refresh)
             total_value = 0.0
-            fee_status = self.get_fee_status()
+            pair_candidates: List[str] = []
             
             # Count significant assets
             significant_assets = []
@@ -341,6 +341,11 @@ class PortfolioManager:
                 else:
                     total_value += usd_value
 
+                normalized_asset = self._normalize_asset_symbol(asset)
+                candidate_pairs = self._build_price_pairs(normalized_asset)
+                if candidate_pairs:
+                    pair_candidates.extend(candidate_pairs[:3])
+
                 significant_assets.append({
                     'asset': asset,
                     'amount': amount,
@@ -354,6 +359,9 @@ class PortfolioManager:
             )
             
             total_usd_value = total_value if significant_assets else None
+
+            unique_pairs = self._dedupe_preserve_order(pair_candidates)[:10]
+            fee_status = self.get_fee_status(unique_pairs if unique_pairs else None)
 
             return {
                 'total_usd_value': total_usd_value,
@@ -376,11 +384,11 @@ class PortfolioManager:
                 'fee_status': {},
             }
 
-    def get_fee_status(self) -> Dict[str, Any]:
+    def get_fee_status(self, candidate_pairs: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         """Return parsed 30-day volume and fee tier information."""
 
         try:
-            response = self.api_client.get_trade_volume(include_fee_info=True)
+            response = self.api_client.get_trade_volume(pair=candidate_pairs, include_fee_info=True)
         except Exception as exc:
             logger.debug("Failed to fetch trade volume for fee status: %s", exc)
             return {}

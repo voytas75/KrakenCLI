@@ -10,6 +10,7 @@ from portfolio.portfolio_manager import PortfolioManager
 class _StubApiClient:
     def __init__(self) -> None:
         self.ticker_calls: list[str] = []
+        self.trade_volume_requests: list[Any] = []
 
     def get_asset_info(self) -> Dict[str, Any]:
         return {"result": {"XXBT": {"altname": "XBT"}}}
@@ -37,6 +38,7 @@ class _StubApiClient:
         return {"result": {"closed": {"1": {"vol": "0.1"}}}}
 
     def get_trade_volume(self, pair=None, include_fee_info: bool = True) -> Dict[str, Any]:
+        self.trade_volume_requests.append(pair)
         return {
             "result": {
                 "currency": "ZUSD",
@@ -61,6 +63,8 @@ def test_portfolio_summary_calculates_usd_values() -> None:
     assert summary["total_assets"] == 2
     assert summary["fee_status"]["currency"] == "ZUSD"
     assert summary["fee_status"]["maker_fee"] == 0.0015
+    assert manager.api_client.trade_volume_requests
+    assert isinstance(manager.api_client.trade_volume_requests[0], list)
 
 
 def test_refresh_portfolio_resets_price_cache() -> None:
