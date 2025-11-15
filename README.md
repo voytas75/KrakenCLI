@@ -230,6 +230,7 @@ Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and 
 |---------|-------------|---------|
 | `status` | Check API connectivity, balances, and log level | `python kraken_cli.py status` |
 | `ticker` | Display market data for a trading pair (`--pair` or base/quote args) | `python kraken_cli.py ticker -p XBTUSD` |
+| `ohlc` | Fetch OHLC candles with table/JSON output (`--pair`, optional `--interval`, `--limit`) | `python kraken_cli.py ohlc -p ETHUSD -i 15 -l 20` |
 | `order` | Validate or execute an order (dry-run by default) | `python kraken_cli.py order --pair ETHUSD --side buy --order-type limit --volume 0.5 --price 2500` |
 | `orders` | View open orders or trade history (`--trades`) | `python kraken_cli.py orders --trades` |
 | `cancel` | Cancel a specific order (`--txid`) or all (`--cancel-all`) | `python kraken_cli.py cancel --txid OABC123` |

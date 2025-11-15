@@ -5,6 +5,7 @@ Official Kraken exchange API wrapper with authentication
 Updates: v0.9.4 - 2025-11-12 - Added caching plus withdrawal and export endpoint helpers.
 Updates: v0.9.7 - 2025-11-13 - Added weighted endpoint costs to the Kraken rate limiter.
 Updates: v0.9.8 - 2025-11-15 - Added public system status endpoint helper.
+Updates: v0.9.10 - 2025-11-15 - Added `since` support for OHLC queries.
 """
 
 import copy
@@ -353,13 +354,31 @@ class KrakenAPIClient:
 
         return self._make_request("public/AssetPairs", params, method='GET')
     
-    def get_ohlc_data(self, pair: str, interval: int = 60) -> Dict[str, Any]:
-        """Get OHLC (candlestick) data"""
-        data = {
-            'pair': pair,
-            'interval': interval
+    def get_ohlc_data(
+        self,
+        pair: str,
+        interval: int = 60,
+        *,
+        since: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Return OHLC (candlestick) data for the requested pair.
+
+        Args:
+            pair: Kraken trading pair, e.g., ``ETHUSD``.
+            interval: Candle interval in minutes (default 60).
+            since: Optional Unix timestamp passed through to Kraken.
+
+        Returns:
+            Kraken response payload containing OHLC data.
+        """
+
+        data: Dict[str, Any] = {
+            "pair": pair,
+            "interval": interval,
         }
-        return self._make_request("public/OHLC", data, method='GET')
+        if since is not None:
+            data["since"] = since
+        return self._make_request("public/OHLC", data, method="GET")
     
     def get_order_book(self, pair: str, count: int = 100) -> Dict[str, Any]:
         """Get order book data"""

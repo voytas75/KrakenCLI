@@ -25,6 +25,17 @@ from risk import RiskDecision, RiskManager
 from strategies.base_strategy import StrategyContext, StrategySignal
 from strategies.strategy_manager import StrategyManager
 from trading.trader import Trader
+from utils.market_data import (
+    KNOWN_QUOTE_SUFFIXES,
+    candidate_pair_keys,
+    dedupe_preserve_order,
+    expand_base_variants,
+    expand_quote_variants,
+    normalize_asset_code,
+    normalize_pair_key,
+    resolve_ohlc_payload,
+    split_pair_components,
+)
 
 if TYPE_CHECKING:
     from alerts.alert_manager import AlertManager
@@ -72,31 +83,6 @@ class TradingEngineStatus:
 
 class TradingEngine:
     """Polling trading engine coordinating strategy evaluation."""
-
-    _KNOWN_QUOTE_SUFFIXES: Tuple[str, ...] = (
-        "ZUSDT",
-        "USDT",
-        "ZUSDC",
-        "USDC",
-        "ZUSD",
-        "USD",
-        "ZEUR",
-        "EUR",
-        "ZGBP",
-        "GBP",
-        "ZJPY",
-        "JPY",
-        "ZCAD",
-        "CAD",
-        "ZCHF",
-        "CHF",
-        "ZETH",
-        "ETH",
-        "ZBTC",
-        "BTC",
-        "XXBT",
-        "XBT",
-    )
 
     TIMEFRAME_TO_INTERVAL = {
         "1m": 1,
@@ -419,7 +405,7 @@ class TradingEngine:
             logger.warning("No OHLCV result payload for %s.", pair)
             return None
 
-        ohlc_data, resolved_key = self._resolve_ohlc_payload(pair, result)
+        ohlc_data, resolved_key = resolve_ohlc_payload(pair, result)
         if ohlc_data is None:
             sample_keys = [key for key in result.keys() if key != "last"][:5]
             logger.warning(
@@ -439,132 +425,40 @@ class TradingEngine:
         logger.debug("Loaded OHLCV data for %s via key %s (%d rows).", pair, resolved_key, len(df))
         return df
 
+    @staticmethod
     def _resolve_ohlc_payload(
-        self,
         requested_pair: str,
         result: Dict[str, Any],
     ) -> Tuple[Optional[Iterable[Any]], Optional[str]]:
-        """Locate the OHLC payload for the requested pair within the API result."""
-        sanitized = {key: value for key, value in result.items() if key != "last"}
-        if not sanitized:
-            return None, None
-
-        target_normalized = self._normalize_pair_key(requested_pair)
-        candidates = self._candidate_pair_keys(requested_pair)
-        for candidate in candidates:
-            payload = sanitized.get(candidate)
-            if not payload:
-                continue
-            if self._normalize_pair_key(candidate) == target_normalized:
-                return payload, candidate
-        for key, payload in sanitized.items():
-            if not payload:
-                continue
-            if self._normalize_pair_key(key) == target_normalized:
-                return payload, key
-        return None, None
+        """Backward-compatible shim for legacy callers."""
+        return resolve_ohlc_payload(requested_pair, result)
 
     @classmethod
     def _normalize_pair_key(cls, pair_key: str) -> str:
-        """Normalize Kraken pair identifiers (e.g., XETHZUSD -> ETHUSD)."""
-        key = pair_key.upper()
-        if len(key) < 6:
-            return key
-        base, quote = cls._split_pair_components(key)
-        normalized_base = TradingEngine._normalize_asset_code(base)
-        normalized_quote = TradingEngine._normalize_asset_code(quote)
-        return f"{normalized_base}{normalized_quote}"
+        return normalize_pair_key(pair_key)
 
     @staticmethod
     def _normalize_asset_code(code: str) -> str:
-        """Strip Kraken-specific leading prefixes without harming native symbols."""
-        normalized = code.upper()
-        while normalized.startswith(("X", "Z")) and len(normalized) > 3:
-            normalized = normalized[1:]
-        return normalized
+        return normalize_asset_code(code)
 
     def _candidate_pair_keys(self, pair: str) -> List[str]:
-        """Return likely Kraken result keys for a requested trading pair."""
-        pair_upper = pair.upper()
-        base, quote = self._split_pair_components(pair_upper)
-        base_variants = self._expand_base_variants(base)
-        quote_variants = self._expand_quote_variants(quote)
-
-        candidates: List[str] = []
-        for base_candidate in base_variants:
-            for quote_candidate in quote_variants:
-                candidates.append(f"{base_candidate}{quote_candidate}")
-
-        if pair_upper not in candidates:
-            candidates.insert(0, pair_upper)
-
-        return self._dedupe_preserve_order(candidates)
+        return candidate_pair_keys(pair)
 
     @classmethod
     def _split_pair_components(cls, pair: str) -> Tuple[str, str]:
-        """Split a pair string into base and quote components, honouring Kraken prefixes."""
-        upper = pair.upper()
-        for suffix in sorted(cls._KNOWN_QUOTE_SUFFIXES, key=len, reverse=True):
-            if upper.endswith(suffix):
-                base = upper[: -len(suffix)]
-                if base:
-                    return base, suffix
-        # Fallback: assume last 3 characters form the quote
-        return upper[:-3], upper[-3:]
+        return split_pair_components(pair)
 
     @staticmethod
     def _expand_base_variants(base: str) -> List[str]:
-        """Produce base asset variants including common Kraken prefixes."""
-        base_upper = base.upper()
-        core = base_upper.split(".")[0]
-        variants = [
-            core,
-            f"X{core}",
-            f"Z{core}",
-            f"XX{core}",
-            base_upper,
-            f"X{base_upper}",
-            f"Z{base_upper}",
-        ]
-        if base_upper.startswith(("X", "Z")) and len(base_upper) > 3:
-            trimmed = base_upper[1:]
-            variants.extend(
-                [
-                    trimmed,
-                    f"X{trimmed}",
-                    f"Z{trimmed}",
-                ]
-            )
-        return TradingEngine._dedupe_preserve_order(variants)
+        return expand_base_variants(base)
 
     @staticmethod
     def _expand_quote_variants(quote: str) -> List[str]:
-        """Produce quote asset variants including Kraken prefixes."""
-        quote_upper = quote.upper()
-        variants = [
-            quote_upper,
-            f"Z{quote_upper}",
-        ]
-        if quote_upper.startswith(("X", "Z")) and len(quote_upper) > 3:
-            trimmed = quote_upper[1:]
-            variants.extend(
-                [
-                    trimmed,
-                    f"Z{trimmed}",
-                ]
-            )
-        return TradingEngine._dedupe_preserve_order(variants)
+        return expand_quote_variants(quote)
 
     @staticmethod
     def _dedupe_preserve_order(values: List[str]) -> List[str]:
-        """Remove duplicates while preserving original order."""
-        seen: set[str] = set()
-        result: List[str] = []
-        for value in values:
-            if value not in seen:
-                seen.add(value)
-                result.append(value)
-        return result
+        return dedupe_preserve_order(values)
 
     def _should_stop(self) -> bool:
         if self._stop_event.is_set():

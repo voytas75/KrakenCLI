@@ -53,7 +53,13 @@ class DummyApiClient:
         self._payload = payload
         self.calls: List[tuple[str, int]] = []
 
-    def get_ohlc_data(self, pair: str, interval: int = 60) -> Dict[str, Any]:
+    def get_ohlc_data(
+        self,
+        pair: str,
+        interval: int = 60,
+        *,
+        since: Optional[int] = None,
+    ) -> Dict[str, Any]:
         self.calls.append((pair, interval))
         return self._payload
 

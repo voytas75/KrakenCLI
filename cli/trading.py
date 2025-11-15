@@ -1,13 +1,15 @@
-"""
-Trading-related CLI commands for KrakenCLI.
+"""Trading-related CLI commands for KrakenCLI.
 
 The register function attaches order management and withdrawal commands to the
 root Click group without keeping all of the logic inside ``kraken_cli.py``.
+
+Updates: v0.9.10 - 2025-11-15 - Added OHLC fetch command with table/JSON rendering.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List, Optional
 
@@ -20,6 +22,7 @@ from api.kraken_client import KrakenAPIClient
 from portfolio.portfolio_manager import PortfolioManager
 from trading.trader import Trader
 from utils.helpers import format_currency
+from utils.market_data import resolve_ohlc_payload
 
 
 def register(
@@ -567,3 +570,159 @@ def register(
             for field, value in result_payload.items():
                 details.add_row(str(field), str(value))
             console.print(details)
+
+    @cli_group.command()
+    @click.option("--pair", "-p", required=True, help="Trading pair (e.g., ETHUSD)")
+    @click.option(
+        "--interval",
+        "-i",
+        default=15,
+        show_default=True,
+        type=click.IntRange(1, 1440),
+        help="Candle interval in minutes.",
+    )
+    @click.option(
+        "--limit",
+        "-l",
+        default=48,
+        show_default=True,
+        type=click.IntRange(1, 720),
+        help="Number of candles to display (most recent first).",
+    )
+    @click.option(
+        "--since",
+        type=int,
+        help="Unix timestamp to fetch candles since (Kraken `since` parameter).",
+    )
+    @click.option(
+        "--output",
+        "-o",
+        type=click.Choice(["table", "json"], case_sensitive=False),
+        default="table",
+        show_default=True,
+        help="Render output as a Rich table or JSON payload.",
+    )
+    @click.pass_context
+    def ohlc(  # type: ignore[unused-ignore]
+        ctx: click.Context,
+        pair: str,
+        interval: int,
+        limit: int,
+        since: Optional[int],
+        output: str,
+    ) -> None:
+        """Fetch OHLC candles for a trading pair.
+
+        Args:
+            ctx (click.Context): Click context carrying cached clients.
+            pair (str): Kraken trading pair (e.g., ``ETHUSD``).
+            interval (int): Candle interval in minutes.
+            limit (int): Number of rows to render.
+            since (Optional[int]): Optional Unix timestamp passed to Kraken.
+            output (str): Rendering mode (`table` or `json`).
+        """
+
+        api_client = _ensure_api_client(ctx)
+        if api_client is None:
+            return
+
+        normalized_pair = pair.upper()
+        console.print(
+            f"[bold blue]📈 Fetching OHLC data for {normalized_pair} ({interval}m)...[/bold blue]"
+        )
+
+        def _fetch() -> Dict[str, Any]:
+            kwargs: Dict[str, Any] = {"since": since} if since is not None else {}
+            return api_client.get_ohlc_data(normalized_pair, interval=interval, **kwargs)
+
+        try:
+            response = call_with_retries(
+                _fetch,
+                "OHLC data fetch",
+                display_label="⏳ Loading OHLC candles",
+            )
+        except Exception as exc:  # pragma: no cover - defensive user message
+            console.print(f"[red]❌ Failed to fetch OHLC data: {exc}[/red]")
+            return
+
+        result = response.get("result", {}) if isinstance(response, dict) else {}
+        candles, resolved_key = resolve_ohlc_payload(normalized_pair, result)
+        if not candles:
+            sample_keys = [key for key in result.keys() if key != "last"][:5]
+            key_hint = ", ".join(sample_keys) if sample_keys else "none"
+            console.print(
+                f"[yellow]⚠️  No OHLC data returned for {normalized_pair}. Available keys: {key_hint}[/yellow]"
+            )
+            return
+
+        rows = list(candles)
+        if not rows:
+            console.print("[yellow]ℹ️  OHLC payload was empty.[/yellow]")
+            return
+
+        limited_rows = rows[-limit:]
+
+        def _convert_row(raw: List[Any]) -> Dict[str, Any]:
+            timestamp = int(raw[0])
+            ts = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            formatted_time = ts.strftime("%Y-%m-%d %H:%M:%S")
+            open_, high, low, close = (float(raw[idx]) for idx in range(1, 5))
+            vwap = float(raw[5])
+            volume = float(raw[6])
+            count = int(raw[7])
+            return {
+                "time": formatted_time,
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "vwap": vwap,
+                "volume": volume,
+                "count": count,
+            }
+
+        converted = [_convert_row(entry) for entry in limited_rows]
+        resolved_label = resolved_key or normalized_pair
+        last_marker = result.get("last")
+
+        if output.lower() == "json":
+            payload = {
+                "pair": resolved_label,
+                "interval": interval,
+                "count": len(converted),
+                "last": last_marker,
+                "candles": converted,
+            }
+            console.print(json.dumps(payload, indent=2, default=str))
+            return
+
+        def _fmt(value: float) -> str:
+            if abs(value) >= 1:
+                return f"{value:,.2f}"
+            return f"{value:.8f}".rstrip("0").rstrip(".") or "0"
+
+        table = Table(
+            title=f"OHLC {resolved_label} — {interval}m",
+            show_lines=False,
+            expand=False,
+        )
+        table.add_column("Time (UTC)", style="cyan")
+        table.add_column("Open", justify="right", style="green")
+        table.add_column("High", justify="right", style="green")
+        table.add_column("Low", justify="right", style="red")
+        table.add_column("Close", justify="right", style="magenta")
+        table.add_column("Vol", justify="right", style="yellow")
+
+        for row in converted:
+            table.add_row(
+                row["time"],
+                _fmt(row["open"]),
+                _fmt(row["high"]),
+                _fmt(row["low"]),
+                _fmt(row["close"]),
+                f"{row['volume']:,.4f}",
+            )
+
+        console.print(table)
+        if last_marker:
+            console.print(f"[dim]Next 'since' token: {last_marker}[/dim]")
