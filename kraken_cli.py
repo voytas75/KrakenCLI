@@ -6,6 +6,7 @@ Professional cryptocurrency trading interface for Kraken exchange
 Updates: v0.9.0 - 2025-11-11 - Added automated trading engine commands and integrations.
 Updates: v0.9.3 - 2025-11-12 - Added risk alert management commands and logging integration.
 Updates: v0.9.4 - 2025-11-12 - Added withdrawal and export management commands.
+Updates: v0.9.5 - 2025-11-15 - Added Kraken system status check to status command.
 """
 
 import click
@@ -386,8 +387,44 @@ def status(ctx):
             return
     
     try:
+        console.print("[bold blue]🌐 Checking Kraken system status...[/bold blue]")
+
+        try:
+            system_status_payload = api_client.get_system_status()
+        except Exception as status_error:
+            console.print(f"[yellow]⚠️  Unable to retrieve system status: {status_error}[/yellow]")
+        else:
+            status_result = system_status_payload.get("result", {})
+            status_value_raw = str(status_result.get("status", "unknown"))
+            normalized_status = status_value_raw.replace("_", " ").strip()
+            status_label = normalized_status.title() if normalized_status else "Unknown"
+            status_icon_map = {
+                "online": "✅",
+                "operational": "✅",
+                "cancel only": "⚠️",
+                "post only": "⚠️",
+                "maintenance": "⚠️",
+                "degraded": "⚠️",
+            }
+            status_icon = status_icon_map.get(normalized_status.lower(), "ℹ️")
+
+            status_table = Table(title="System Status", show_lines=False, expand=False)
+            status_table.add_column("Metric", style="cyan", no_wrap=True)
+            status_table.add_column("Value", style="green")
+            status_table.add_row("Status", f"{status_icon} {status_label}")
+
+            status_timestamp = status_result.get("timestamp")
+            if status_timestamp:
+                status_table.add_row("Updated", str(status_timestamp))
+
+            status_message = status_result.get("message")
+            if status_message:
+                status_table.add_row("Message", str(status_message))
+
+            console.print(status_table)
+
         console.print("[bold blue]🔌 Checking Kraken API connection...[/bold blue]")
-        
+
         # Test connection
         time_info = api_client.get_server_time()
         balance = api_client.get_account_balance()

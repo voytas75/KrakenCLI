@@ -4,6 +4,7 @@ Official Kraken exchange API wrapper with authentication
 
 Updates: v0.9.4 - 2025-11-12 - Added caching plus withdrawal and export endpoint helpers.
 Updates: v0.9.7 - 2025-11-13 - Added weighted endpoint costs to the Kraken rate limiter.
+Updates: v0.9.8 - 2025-11-15 - Added public system status endpoint helper.
 """
 
 import copy
@@ -302,7 +303,11 @@ class KrakenAPIClient:
     def get_server_time(self) -> Dict[str, Any]:
         """Get server time"""
         return self._make_request("public/Time")
-    
+
+    def get_system_status(self) -> Dict[str, Any]:
+        """Return Kraken's current system status information."""
+        return self._make_request("public/SystemStatus", method="GET")
+
     def get_account_balance(self) -> Dict[str, Any]:
         """Get account balance"""
         return self._make_request("private/Balance", auth_required=True)
