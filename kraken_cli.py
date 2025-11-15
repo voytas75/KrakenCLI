@@ -467,17 +467,19 @@ def status(ctx):
                 ".S": "Staked balance",
                 ".M": "Opt-in rewards balance",
             }
-             
+              
             for asset, balance_str in balance_data.items():
                 # Kraken returns balances as strings, not dictionaries; display raw value for clarity
                 if float(balance_str) > 0:
                     note = ""
+                    display_asset = asset
                     for suffix, message in suffix_notes.items():
                         if asset.endswith(suffix):
                             note = message
+                            display_asset = asset[:-len(suffix)] or asset
                             break
                     table.add_row(
-                        asset,
+                        display_asset,
                         str(balance_str),
                         note
                     )
