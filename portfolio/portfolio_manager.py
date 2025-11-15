@@ -23,6 +23,7 @@ class PortfolioManager:
         self._failed_price_assets: Set[str] = set()
         self._asset_pairs_loaded: bool = False
         self._asset_pairs_by_key: Dict[Tuple[str, str], List[str]] = {}
+        self._known_pair_identifiers: Set[str] = set()
 
     def _load_asset_metadata(self) -> None:
         """Load asset metadata and cache alt names for price lookups."""
@@ -70,27 +71,18 @@ class PortfolioManager:
             names: List[str] = []
             altname = payload.get('altname')
             wsname = payload.get('wsname')
+
+            if pair_name:
+                names.append(str(pair_name).upper())
             if altname:
-                names.append(str(altname))
-            names.append(pair_name)
+                names.append(str(altname).upper())
             if wsname:
-                names.append(str(wsname))
+                names.append(str(wsname).upper())
+            names.append(f"{base_code}/{quote_code}")
 
-            def _ensure_variants(value: str) -> None:
-                value = value.strip()
-                if not value:
-                    return
-                names.append(value)
-                cleaned = value.replace('/', '')
-                if '/' not in value and len(cleaned) >= 6:
-                    midpoint = len(cleaned) // 2
-                    names.append(f"{cleaned[:midpoint]}/{cleaned[midpoint:]}")
-
-            for name in list(names):
-                _ensure_variants(name.upper())
-                _ensure_variants(name)
-
-            bucket[:] = self._dedupe_preserve_order(bucket + names)
+            deduped = self._dedupe_preserve_order(names)
+            bucket[:] = deduped
+            self._known_pair_identifiers.update(deduped)
 
         self._asset_pairs_loaded = True
 
@@ -110,6 +102,7 @@ class PortfolioManager:
         self._failed_price_assets.clear()
         self._asset_pairs_loaded = False
         self._asset_pairs_by_key.clear()
+        self._known_pair_identifiers.clear()
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
