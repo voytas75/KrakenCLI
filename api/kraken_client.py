@@ -335,6 +335,18 @@ class KrakenAPIClient:
         """Get ticker information"""
         data = {'pair': pair}
         return self._make_request("public/Ticker", data, method='GET')
+
+    def get_asset_pairs(self, pair: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
+        """Retrieve tradable asset pair metadata."""
+
+        params: Dict[str, Any] = {}
+        if pair:
+            if isinstance(pair, str):
+                params['pair'] = pair
+            else:
+                params['pair'] = ",".join(str(item) for item in pair if item)
+
+        return self._make_request("public/AssetPairs", params, method='GET')
     
     def get_ohlc_data(self, pair: str, interval: int = 60) -> Dict[str, Any]:
         """Get OHLC (candlestick) data"""
