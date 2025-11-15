@@ -158,10 +158,12 @@ def test_portfolio_command_displays_fee_status(monkeypatch) -> None:
         "fee_status": {
             "currency": "ZUSD",
             "thirty_day_volume": 1500.5,
-            "maker_fee": 0.0015,
-            "taker_fee": 0.0020,
-            "next_fee": 0.0010,
+            "pair": "XXBT/ZUSD",
+            "maker_fee": 0.16,
+            "taker_fee": 0.26,
+            "next_fee": 0.24,
             "next_volume": 50000,
+            "tier_volume": 0,
         },
     }
 
@@ -174,5 +176,6 @@ def test_portfolio_command_displays_fee_status(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "Fee Status" in result.output
-    assert "0.1500%" in result.output
+    assert "0.1600%" in result.output
     assert "USD 1,500.50" in result.output
+    assert "Current Tier Volume" in result.output

@@ -145,9 +145,10 @@ class PortfolioManager:
         pairs = []
         for base_candidate in base_variants:
             for quote_candidate in quote_variants:
+                slash = f"{base_candidate}/{quote_candidate}"
                 compact = f"{base_candidate}{quote_candidate}"
+                pairs.append(slash)
                 pairs.append(compact)
-                pairs.append(f"{base_candidate}/{quote_candidate}")
 
         return self._dedupe_preserve_order(pairs)
 
@@ -405,30 +406,46 @@ class PortfolioManager:
         currency = result.get('currency')
         volume = self._to_float(result.get('volume'))
 
-        fees = result.get('fees') if isinstance(result.get('fees'), dict) else {}
-        fees_maker = result.get('fees_maker') if isinstance(result.get('fees_maker'), dict) else {}
+        fees_dict = result.get('fees') if isinstance(result.get('fees'), dict) else {}
+        maker_dict = result.get('fees_maker') if isinstance(result.get('fees_maker'), dict) else {}
 
-        def _first_fee_entry(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            for entry in payload.values():
+        pair_key: Optional[str] = None
+        taker_entry: Optional[Dict[str, Any]] = None
+        for key, entry in fees_dict.items():
+            if isinstance(entry, dict):
+                pair_key = key
+                taker_entry = entry
+                break
+
+        maker_entry: Optional[Dict[str, Any]] = None
+        if pair_key and isinstance(maker_dict.get(pair_key), dict):
+            maker_entry = maker_dict[pair_key]
+        else:
+            for entry in maker_dict.values():
                 if isinstance(entry, dict):
-                    return entry
-            return None
-
-        taker_entry = _first_fee_entry(fees)
-        maker_entry = _first_fee_entry(fees_maker) or taker_entry
+                    maker_entry = entry
+                    break
+        if maker_entry is None:
+            maker_entry = taker_entry
 
         maker_fee = self._to_float(maker_entry.get('fee')) if maker_entry else None
         taker_fee = self._to_float(taker_entry.get('fee')) if taker_entry else None
         next_fee = self._to_float(taker_entry.get('nextfee')) if taker_entry else None
         next_volume = self._to_float(taker_entry.get('nextvolume')) if taker_entry else None
+        tier_volume = self._to_float(taker_entry.get('tiervolume')) if taker_entry else None
+
+        if pair_key and '/' not in pair_key and len(pair_key) >= 6:
+            pair_key = f"{pair_key[:-4]}/{pair_key[-4:]}"
 
         return {
             'currency': currency,
             'thirty_day_volume': volume,
+            'pair': pair_key or ','.join(candidate_pairs) if candidate_pairs else None,
             'maker_fee': maker_fee,
             'taker_fee': taker_fee,
             'next_fee': next_fee,
             'next_volume': next_volume,
+            'tier_volume': tier_volume,
         }
     
     def get_performance_metrics(self, days: int = 30) -> Dict[str, Any]:

@@ -133,7 +133,7 @@ def register(
     def _format_fee_percent(value: Optional[float]) -> str:
         if value is None:
             return "N/A"
-        return f"{value * 100:.4f}%"
+        return f"{value:.4f}%"
 
     def _assets_index(summary: Dict[str, Any]) -> Dict[str, Dict[str, Optional[float]]]:
         index: Dict[str, Dict[str, Optional[float]]] = {}
@@ -299,17 +299,23 @@ def register(
                 taker_value = _safe_float(fee_status.get("taker_fee"))
                 next_fee_value = _safe_float(fee_status.get("next_fee"))
                 next_volume_value = _safe_float(fee_status.get("next_volume"))
+                tier_volume_value = _safe_float(fee_status.get("tier_volume"))
+
+                pair_display = fee_status.get("pair") or "Multiple"
 
                 volume_text = _format_currency_value(volume_value, currency=currency_display)
                 maker_text = _format_fee_percent(maker_value)
                 taker_text = _format_fee_percent(taker_value)
                 next_fee_text = _format_fee_percent(next_fee_value)
                 next_volume_text = _format_currency_value(next_volume_value, currency=currency_display)
+                tier_volume_text = _format_currency_value(tier_volume_value, currency=currency_display)
 
+                fee_table.add_row("Pair", str(pair_display))
                 fee_table.add_row("30-day Volume", volume_text)
                 fee_table.add_row("Maker Fee", maker_text)
                 fee_table.add_row("Taker Fee", taker_text)
                 fee_table.add_row("Next Fee Tier", next_fee_text)
+                fee_table.add_row("Current Tier Volume", tier_volume_text)
                 fee_table.add_row("Volume For Next Tier", next_volume_text)
 
                 console.print(fee_table)

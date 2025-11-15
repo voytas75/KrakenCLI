@@ -44,10 +44,24 @@ class _StubApiClient:
                 "currency": "ZUSD",
                 "volume": "1500.5",
                 "fees": {
-                    "XXBTZUSD": {"fee": "0.002", "minfee": "0.001", "nextfee": "0.0025", "nextvolume": "200000"}
+                    "XXBT/ZUSD": {
+                        "fee": "0.26",
+                        "minfee": "0.24",
+                        "maxfee": "0.32",
+                        "nextfee": "0.24",
+                        "nextvolume": "50000",
+                        "tiervolume": "0",
+                    }
                 },
                 "fees_maker": {
-                    "XXBTZUSD": {"fee": "0.0015", "minfee": "0.001", "nextfee": "0.0010", "nextvolume": "50000"}
+                    "XXBT/ZUSD": {
+                        "fee": "0.16",
+                        "minfee": "0.12",
+                        "maxfee": "0.26",
+                        "nextfee": "0.14",
+                        "nextvolume": "50000",
+                        "tiervolume": "0",
+                    }
                 },
             }
         }
@@ -62,7 +76,8 @@ def test_portfolio_summary_calculates_usd_values() -> None:
     assert summary["open_orders_count"] == 1  # underlying open dict counts as 1 entry
     assert summary["total_assets"] == 2
     assert summary["fee_status"]["currency"] == "ZUSD"
-    assert summary["fee_status"]["maker_fee"] == 0.0015
+    assert summary["fee_status"]["maker_fee"] == 0.16
+    assert summary["fee_status"]["pair"] == "XXBT/ZUSD"
     assert manager.api_client.trade_volume_requests
     first_request = manager.api_client.trade_volume_requests[0]
     assert isinstance(first_request, list)
@@ -115,7 +130,7 @@ def test_portfolio_helpers_expose_balances_and_history() -> None:
     assert manager.get_usd_value("UNKNOWN", 1.0) is not None
 
     fee_status = manager.get_fee_status()
-    assert fee_status["maker_fee"] == 0.0015
+    assert fee_status["maker_fee"] == 0.16
     assert fee_status["thirty_day_volume"] == 1500.5
 
 
