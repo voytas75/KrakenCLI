@@ -6,6 +6,7 @@ open positions using Rich tables.
 
 Updates: v0.9.8 - 2025-11-15 - Added snapshot save and comparison options.
 Updates: v0.9.9 - 2025-11-15 - Print raw fee status payload when debug logging is active.
+Updates: v0.9.10 - 2025-11-16 - Align asset display with status command notes and raw values.
 """
 
 from __future__ import annotations
@@ -253,12 +254,22 @@ def register(
                 table = Table(title="Asset Balances")
                 table.add_column("Asset", style="cyan")
                 table.add_column("Pair", style="yellow")
-                table.add_column("Amount", justify="right", style="green")
+                table.add_column("Balance", justify="right", style="green")
                 table.add_column("USD Value", justify="right", style="blue")
+                table.add_column("Note", style="yellow")
+
+                suffix_notes = {
+                    ".B": "Yield-bearing balance",
+                    ".F": "Kraken Rewards balance",
+                    ".T": "Tokenized asset",
+                    ".S": "Staked balance",
+                    ".M": "Opt-in rewards balance",
+                }
 
                 for row in asset_rows:
-                    asset_code = row.get("asset", "N/A")
+                    asset_code = str(row.get("asset", "N/A"))
                     amount_value = row.get("amount", 0.0)
+                    raw_amount = row.get("raw_amount")
                     usd_value = row.get("usd_value")
 
                     try:
@@ -269,12 +280,24 @@ def register(
                     if amount_float <= 0:
                         continue
 
-                    amount_text = format_asset_amount(amount_float, asset_code)
-                    usd_text = format_currency(usd_value, decimals=2) if usd_value is not None else "N/A"
+                    note = ""
+                    display_asset = asset_code
+                    for suffix, message in suffix_notes.items():
+                        if asset_code.endswith(suffix):
+                            note = message
+                            display_asset = asset_code[: -len(suffix)] or asset_code
+                            break
 
+                    amount_text: str
+                    if isinstance(raw_amount, str) and raw_amount.strip():
+                        amount_text = raw_amount.strip()
+                    else:
+                        amount_text = str(amount_value)
+
+                    usd_text = format_currency(usd_value, decimals=2) if usd_value is not None else "N/A"
                     pair_display = portfolio_manager.get_pair_display(asset_code, "USD")
 
-                    table.add_row(asset_code, pair_display, amount_text, usd_text)
+                    table.add_row(display_asset, pair_display, amount_text, usd_text, note)
 
                 console.print(table)
 

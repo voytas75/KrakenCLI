@@ -183,3 +183,33 @@ def test_portfolio_command_displays_fee_status(monkeypatch) -> None:
     assert "0.1600%" in result.output
     assert "USD 1,500.50" in result.output
     assert "Current Tier Volume" in result.output
+
+
+def test_portfolio_command_displays_suffix_notes(monkeypatch) -> None:
+    runner = CliRunner()
+
+    summary = {
+        "significant_assets": [
+            {
+                "asset": "ADA.S",
+                "amount": 12.3456789,
+                "usd_value": 100.0,
+                "raw_amount": "12.3456789",
+            },
+        ],
+        "total_usd_value": 100.0,
+        "missing_assets": [],
+        "fee_status": {},
+    }
+
+    portfolio_stub = _StubPortfolio(summary, positions={})
+
+    _install_api_client(monkeypatch)
+    _install_portfolio(monkeypatch, portfolio_stub)
+
+    result = runner.invoke(kraken_cli.cli, ["portfolio"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "Staked balance" in result.output
+    assert "ADA" in result.output
+    assert "12.3456789" in result.output

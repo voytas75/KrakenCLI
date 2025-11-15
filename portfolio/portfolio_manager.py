@@ -3,6 +3,7 @@ Portfolio management for Kraken trading.
 
 Updates: v0.9.4 - 2025-11-12 - Added cache refresh helpers for order and ledger data.
 Updates: v0.9.5 - 2025-11-15 - Surface raw fee status responses for debug consumers.
+Updates: v0.9.6 - 2025-11-16 - Preserve raw balance amounts in portfolio summaries.
 """
 
 import logging
@@ -437,6 +438,7 @@ class PortfolioManager:
                     'asset': asset,
                     'amount': amount,
                     'usd_value': usd_value,
+                    'raw_amount': str(amount_str),
                 })
             
             # Sort by USD value
