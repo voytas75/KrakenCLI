@@ -7,6 +7,7 @@ Updates: v0.9.0 - 2025-11-11 - Added automated trading engine commands and integ
 Updates: v0.9.3 - 2025-11-12 - Added risk alert management commands and logging integration.
 Updates: v0.9.4 - 2025-11-12 - Added withdrawal and export management commands.
 Updates: v0.9.5 - 2025-11-15 - Added Kraken system status check to status command.
+Updates: v0.9.6 - 2025-11-15 - Surface raw balance API payload in debug mode.
 """
 
 import click
@@ -20,6 +21,7 @@ from typing import Any, Dict, Optional, Tuple, List
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
+from rich.pretty import Pretty
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 import logging
@@ -439,6 +441,15 @@ def status(ctx):
         else:
             console.print("🕐 Server time: Available")
         # Check balance from result field (2025 API format)
+        if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
+            console.print(
+                Panel.fit(
+                    Pretty(balance, expand_all=True),
+                    title="Balance API Raw Response",
+                    border_style="dim",
+                )
+            )
+
         balance_data = balance.get('result', {})
         console.print(f"💰 Account balances retrieved: {len(balance_data) if balance_data else 0}")
         
