@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Configuration support for weighted Kraken endpoint costs in the rate limiter.
 - Kraken API client session tests, trader execution tests, and config endpoint weight coverage additions.
 - Additional CLI automation coverage for trading, portfolio, and export commands.
+- `ohlc` CLI command for fetching candlestick data with table or JSON output.
 
 ### Changed
 - `run_tests.sh` now enforces ≥80% coverage via the coverage CLI.
