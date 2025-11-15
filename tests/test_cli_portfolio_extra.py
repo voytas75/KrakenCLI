@@ -89,3 +89,48 @@ def test_portfolio_command_save_snapshot(monkeypatch, tmp_path) -> None:
     assert len(files) == 1
     saved_payload = json.loads(files[0].read_text(encoding="utf-8"))
     assert saved_payload["total_usd_value"] == summary["total_usd_value"]
+
+
+def test_portfolio_command_compare_snapshot(monkeypatch, tmp_path) -> None:
+    runner = CliRunner()
+
+    current_summary = {
+        "significant_assets": [
+            {"asset": "XXBT", "amount": "0.11", "usd_value": 6200.0},
+        ],
+        "total_usd_value": 6200.0,
+        "missing_assets": [],
+        "open_positions_count": 0,
+        "open_orders_count": 0,
+        "total_assets": 1,
+    }
+
+    snapshot_summary = {
+        "significant_assets": [
+            {"asset": "XXBT", "amount": "0.10", "usd_value": 6000.0},
+        ],
+        "total_usd_value": 6000.0,
+        "missing_assets": [],
+        "open_positions_count": 0,
+        "open_orders_count": 0,
+        "total_assets": 1,
+    }
+
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot_summary), encoding="utf-8")
+
+    portfolio_stub = _StubPortfolio(current_summary, positions={})
+
+    _install_api_client(monkeypatch)
+    _install_portfolio(monkeypatch, portfolio_stub)
+
+    result = runner.invoke(
+        kraken_cli.cli,
+        ["portfolio", "--compare", str(snapshot_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "Portfolio Comparison" in result.output
+    assert "+USD 200.00" in result.output
+    assert "+0.01" in result.output

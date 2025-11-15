@@ -3,6 +3,8 @@ Portfolio command registration for KrakenCLI.
 
 This module encapsulates the ``portfolio`` command that displays balances and
 open positions using Rich tables.
+
+Updates: v0.9.8 - 2025-11-15 - Added snapshot save and comparison options.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 import click
 from rich.console import Console
@@ -89,6 +91,122 @@ def register(
             logger.error("Failed to write portfolio snapshot: %s", exc)
             return None
 
+    def _load_snapshot(path: Path) -> Optional[Dict[str, Any]]:
+        """Return snapshot payload from disk when possible."""
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error("Failed to read snapshot %s: %s", path, exc)
+            return None
+        if not isinstance(payload, dict):
+            logger.error("Snapshot %s did not contain a JSON object", path)
+            return None
+        return payload
+
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _format_currency_value(value: Optional[float]) -> str:
+        if value is None:
+            return "N/A"
+        return format_currency(value, decimals=2)
+
+    def _format_currency_delta(delta: Optional[float]) -> str:
+        if delta is None:
+            return "N/A"
+        if abs(delta) < 1e-9:
+            return "USD 0.00"
+        sign = "+" if delta > 0 else "-"
+        return f"{sign}{format_currency(abs(delta), decimals=2)}"
+
+    def _format_amount_delta(delta: float, asset: str) -> str:
+        if abs(delta) < 1e-12:
+            return "0"
+        sign = "+" if delta > 0 else "-"
+        return f"{sign}{format_asset_amount(abs(delta), asset)}"
+
+    def _assets_index(summary: Dict[str, Any]) -> Dict[str, Dict[str, Optional[float]]]:
+        index: Dict[str, Dict[str, Optional[float]]] = {}
+        for entry in summary.get("significant_assets", []) or []:
+            asset = str(entry.get("asset", "")).upper()
+            if not asset:
+                continue
+            amount = _safe_float(entry.get("amount")) or 0.0
+            usd_value = _safe_float(entry.get("usd_value"))
+            index[asset] = {
+                "amount": amount,
+                "usd": usd_value,
+            }
+        return index
+
+    def _display_comparison(
+        current_summary: Dict[str, Any],
+        snapshot_summary: Dict[str, Any],
+    ) -> None:
+        current_assets = _assets_index(current_summary)
+        snapshot_assets = _assets_index(snapshot_summary)
+        asset_keys = sorted(set(current_assets) | set(snapshot_assets))
+
+        if not asset_keys:
+            console.print("[yellow]ℹ️  No asset data available for comparison.[/yellow]")
+            return
+
+        table = Table(title="Portfolio Comparison")
+        table.add_column("Asset", style="cyan")
+        table.add_column("Snapshot Amount", justify="right", style="yellow")
+        table.add_column("Current Amount", justify="right", style="green")
+        table.add_column("Δ Amount", justify="right", style="magenta")
+        table.add_column("Snapshot USD", justify="right", style="yellow")
+        table.add_column("Current USD", justify="right", style="green")
+        table.add_column("Δ USD", justify="right", style="magenta")
+
+        for asset in asset_keys:
+            snapshot_entry = snapshot_assets.get(asset, {"amount": 0.0, "usd": None})
+            current_entry = current_assets.get(asset, {"amount": 0.0, "usd": None})
+
+            snapshot_amount = snapshot_entry.get("amount") or 0.0
+            current_amount = current_entry.get("amount") or 0.0
+            amount_delta = current_amount - snapshot_amount
+
+            snapshot_usd = snapshot_entry.get("usd")
+            current_usd = current_entry.get("usd")
+            usd_delta: Optional[float]
+            if snapshot_usd is not None and current_usd is not None:
+                usd_delta = current_usd - snapshot_usd
+            else:
+                usd_delta = None
+
+            table.add_row(
+                asset,
+                format_asset_amount(snapshot_amount, asset),
+                format_asset_amount(current_amount, asset),
+                _format_amount_delta(amount_delta, asset),
+                _format_currency_value(snapshot_usd),
+                _format_currency_value(current_usd),
+                _format_currency_delta(usd_delta),
+            )
+
+        snapshot_total = _safe_float(snapshot_summary.get("total_usd_value"))
+        current_total = _safe_float(current_summary.get("total_usd_value"))
+        total_delta = (
+            current_total - snapshot_total
+            if snapshot_total is not None and current_total is not None
+            else None
+        )
+
+        console.print(table)
+        snapshot_text = _format_currency_value(snapshot_total)
+        current_text = _format_currency_value(current_total)
+        delta_text = _format_currency_delta(total_delta)
+        console.print(
+            f"[bold magenta]Snapshot Total: {snapshot_text} | Current Total: {current_text} | Δ {delta_text}[/bold magenta]"
+        )
+
     @cli_group.command()
     @click.option("--pair", "-p", help="Filter by trading pair")
     @click.option(
@@ -96,11 +214,17 @@ def register(
         is_flag=True,
         help="Save portfolio summary to logs/portfolio/snapshots/",
     )
+    @click.option(
+        "--compare",
+        type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+        help="Compare current portfolio summary with the provided snapshot JSON file.",
+    )
     @click.pass_context
     def portfolio(  # type: ignore[unused-ignore]
         ctx: click.Context,
         pair: Optional[str],
         save: bool,
+        compare: Optional[Path],
     ) -> None:
         """Show portfolio overview."""
 
@@ -161,6 +285,14 @@ def register(
                     console.print(f"[green]✅ Snapshot saved to {snapshot_path}[/green]")
                 else:
                     console.print("[red]❌ Failed to save portfolio snapshot.[/red]")
+
+            if compare and summary:
+                snapshot_payload = _load_snapshot(compare)
+                if snapshot_payload is None:
+                    console.print(f"[red]❌ Failed to load snapshot from {compare}[/red]")
+                else:
+                    console.print()
+                    _display_comparison(summary, snapshot_payload)
 
             positions = portfolio_manager.get_open_positions()
             if positions:

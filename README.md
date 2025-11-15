@@ -234,7 +234,7 @@ Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and 
 | `cancel` | Cancel a specific order (`--txid`) or all (`--cancel-all`) | `python kraken_cli.py cancel --txid OABC123` |
 | `withdraw` | Submit withdrawals or inspect status (`--status`) | `python kraken_cli.py withdraw --asset ZUSD --key Primary --amount 25 --confirm` |
 | `export-report` | Manage Kraken export jobs (create/status/retrieve/delete) | `python kraken_cli.py export-report --report ledgers --description "Monthly" --confirm` |
-| `portfolio` | Summarise balances, USD valuations, and open positions | `python kraken_cli.py portfolio` |
+| `portfolio` | Summarise balances, USD valuations, open positions; optionally `--save` or `--compare SNAPSHOT` | `python kraken_cli.py portfolio --compare logs/portfolio/snapshots/portfolio_20250101T120000Z.json` |
 | `config-setup` | Interactive `.env` generator | `python kraken_cli.py config-setup` |
 | `risk-alerts` | Enable/disable alert notifications or inspect status | `python kraken_cli.py risk-alerts --status` |
 | `info` | Application overview, risk warnings, and current log level | `python kraken_cli.py info` |
@@ -258,6 +258,7 @@ Set `KRAKEN_SANDBOX=true` for test trading. Use a dedicated sandbox API key and 
 ## Logging & Monitoring
 
 - Logs are written to `logs/kraken_cli.log` with rotation (10 MB x 5 files).
+- Portfolio snapshots created with `python kraken_cli.py portfolio --save` store JSON payloads under `logs/portfolio/snapshots/`; reuse them with `--compare` to diff current balances against a saved state.
 - Root logger honours `KRAKEN_LOG_LEVEL`; invalid values fall back to `INFO`.
 - Outgoing API calls and errors are logged without leaking sensitive data.
 - The current log level is displayed in CLI output (`status` command and application info panel) to confirm runtime configuration quickly.
