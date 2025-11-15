@@ -201,20 +201,18 @@ class PortfolioManager:
             f"Z{quote_upper}",
         ]
 
-        pairs = []
+        norm_key = (
+            self._normalize_asset_symbol(base_upper),
+            self._normalize_asset_symbol(quote_upper),
+        )
+        mapped = list(self._asset_pairs_by_key.get(norm_key, []))
+        pairs = mapped[:]
         for base_candidate in base_variants:
             for quote_candidate in quote_variants:
                 slash = f"{base_candidate}/{quote_candidate}"
                 compact = f"{base_candidate}{quote_candidate}"
                 pairs.append(slash)
                 pairs.append(compact)
-
-        norm_key = (
-            self._normalize_asset_symbol(base_upper),
-            self._normalize_asset_symbol(quote_upper),
-        )
-        mapped = self._asset_pairs_by_key.get(norm_key, [])
-        pairs.extend(mapped)
 
         return self._dedupe_preserve_order(pairs)
 
