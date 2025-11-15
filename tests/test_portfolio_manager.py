@@ -64,7 +64,9 @@ def test_portfolio_summary_calculates_usd_values() -> None:
     assert summary["fee_status"]["currency"] == "ZUSD"
     assert summary["fee_status"]["maker_fee"] == 0.0015
     assert manager.api_client.trade_volume_requests
-    assert isinstance(manager.api_client.trade_volume_requests[0], list)
+    first_request = manager.api_client.trade_volume_requests[0]
+    assert isinstance(first_request, list)
+    assert any('/' in pair for pair in first_request)
 
 
 def test_refresh_portfolio_resets_price_cache() -> None:

@@ -113,7 +113,7 @@ class PortfolioManager:
         return result
 
     def _build_price_pairs(self, base: str, quote: str = "USD") -> List[str]:
-        """Generate candidate Kraken pair identifiers for price lookups."""
+        """Generate candidate Kraken pair identifiers for price lookups and fee calls."""
         base_upper = (base or "").upper()
         quote_upper = (quote or "").upper()
 
@@ -145,7 +145,9 @@ class PortfolioManager:
         pairs = []
         for base_candidate in base_variants:
             for quote_candidate in quote_variants:
-                pairs.append(f"{base_candidate}{quote_candidate}")
+                compact = f"{base_candidate}{quote_candidate}"
+                pairs.append(compact)
+                pairs.append(f"{base_candidate}/{quote_candidate}")
 
         return self._dedupe_preserve_order(pairs)
 
