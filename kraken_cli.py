@@ -9,6 +9,7 @@ Updates: v0.9.4 - 2025-11-12 - Added withdrawal and export management commands.
 Updates: v0.9.5 - 2025-11-15 - Added Kraken system status check to status command.
 Updates: v0.9.6 - 2025-11-15 - Surface raw balance API payload in debug mode.
 Updates: v0.9.7 - 2025-11-15 - Display exact balance strings without rounding.
+Updates: v0.9.8 - 2025-11-15 - Annotate special asset suffixes in balance table.
 """
 
 import click
@@ -457,13 +458,28 @@ def status(ctx):
             table = Table(title="Account Balances")
             table.add_column("Asset", style="cyan")
             table.add_column("Balance", style="green")
-            
+            table.add_column("Note", style="yellow")
+
+            suffix_notes = {
+                ".B": "Yield-bearing balance",
+                ".F": "Kraken Rewards balance",
+                ".T": "Tokenized asset",
+                ".S": "Staked balance",
+                ".M": "Opt-in rewards balance",
+            }
+             
             for asset, balance_str in balance_data.items():
                 # Kraken returns balances as strings, not dictionaries; display raw value for clarity
                 if float(balance_str) > 0:
+                    note = ""
+                    for suffix, message in suffix_notes.items():
+                        if asset.endswith(suffix):
+                            note = message
+                            break
                     table.add_row(
                         asset,
-                        str(balance_str)
+                        str(balance_str),
+                        note
                     )
             
             console.print(table)
