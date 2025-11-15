@@ -10,6 +10,7 @@ Updates: v0.9.5 - 2025-11-15 - Added Kraken system status check to status comman
 Updates: v0.9.6 - 2025-11-15 - Surface raw balance API payload in debug mode.
 Updates: v0.9.7 - 2025-11-15 - Display exact balance strings without rounding.
 Updates: v0.9.8 - 2025-11-15 - Annotate special asset suffixes in balance table.
+Updates: v0.9.9 - 2025-11-15 - Highlight zero-balance assets count in status output.
 """
 
 import click
@@ -452,7 +453,22 @@ def status(ctx):
             )
 
         balance_data = balance.get('result', {})
-        console.print(f"💰 Account balances retrieved: {len(balance_data) if balance_data else 0}")
+
+        def _is_zero_balance(candidate: Any) -> bool:
+            """Return True when the provided balance value is empty or zero."""
+
+            try:
+                normalized = str(candidate).strip()
+                if not normalized:
+                    return True
+                return float(normalized) == 0.0
+            except (ValueError, TypeError):
+                return False
+
+        total_assets = len(balance_data) if balance_data else 0
+        zero_assets = sum(1 for amount in balance_data.values() if _is_zero_balance(amount)) if balance_data else 0
+
+        console.print(f"💰 Account balances retrieved: {total_assets} ({zero_assets})")
         
         if balance_data:
             table = Table(title="Account Balances")
@@ -467,7 +483,7 @@ def status(ctx):
                 ".S": "Staked balance",
                 ".M": "Opt-in rewards balance",
             }
-              
+
             for asset, balance_str in balance_data.items():
                 # Kraken returns balances as strings, not dictionaries; display raw value for clarity
                 if float(balance_str) > 0:
