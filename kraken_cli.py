@@ -332,6 +332,10 @@ automation_commands.AUTO_CONTROL_DIR = AUTO_CONTROL_DIR
 automation_commands.RISK_STATE_FILE = RISK_STATE_FILE
 automation_commands.AUTO_STATUS_FILE = AUTO_STATUS_FILE
 
+# Re-export automation helpers for integration tests and Click patching.
+_create_trading_engine = automation_commands._create_trading_engine
+_display_auto_start_summary = automation_commands._display_auto_start_summary
+
 trading_commands.register(
     cli,
     console=console,

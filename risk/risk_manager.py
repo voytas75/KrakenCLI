@@ -5,6 +5,7 @@ Updates:
     v0.9.0 - 2025-11-11 - Implemented baseline daily limits and position sizing rules.
     v0.9.2 - 2025-11-12 - Added stop loss/take profit handling, realised PnL tracking, and drawdown enforcement.
     v0.9.3 - 2025-11-12 - Integrated alert notifications and daily loss guardrails.
+    v0.9.4 - 2025-11-15 - Hardened price extraction for test harness compatibility.
 """
 
 from __future__ import annotations
@@ -236,7 +237,9 @@ class RiskManager:
                 self._trigger_daily_loss_alert(max_loss_allowed)
                 return RiskDecision(False, "Maximum daily drawdown reached; halting trades.")
 
-        entry_price = float(context.ohlcv["close"].iloc[-1])
+        entry_price = self._latest_close_price(context)
+        if entry_price is None:
+            return RiskDecision(False, "Unable to determine latest close price.")
         stop_loss_price, take_profit_price = self._derive_protective_prices(
             entry_price=entry_price,
             limits=limits,
@@ -268,7 +271,12 @@ class RiskManager:
         self.reset_if_new_day()
 
         now = datetime.now(tz=timezone.utc)
-        exit_price = decision.entry_price or float(context.ohlcv["close"].iloc[-1])
+        exit_price = decision.entry_price if decision.entry_price is not None else self._latest_close_price(context)
+        if exit_price is None:
+            logger.debug("Exit price unavailable for %s; defaulting to zero.", pair)
+            exit_price = 0.0
+        else:
+            exit_price = float(exit_price)
         realised_pnl = 0.0
 
         if decision.closing_position:
@@ -288,7 +296,12 @@ class RiskManager:
                     position.volume -= volume
                     self._state.positions[pair] = position
         else:
-            entry_price = decision.entry_price or float(context.ohlcv["close"].iloc[-1])
+            entry_price = decision.entry_price if decision.entry_price is not None else self._latest_close_price(context)
+            if entry_price is None:
+                logger.debug("Entry price unavailable for %s when recording position; defaulting to zero.", pair)
+                entry_price = 0.0
+            else:
+                entry_price = float(entry_price)
             volume = float(decision.volume or 0.0)
             if volume > 0:
                 self._state.positions[pair] = _PositionState(
@@ -390,6 +403,26 @@ class RiskManager:
         return limits
 
     @staticmethod
+    def _latest_close_price(context: StrategyContext) -> Optional[float]:
+        """Return the most recent close price from the strategy context."""
+
+        try:
+            series = context.ohlcv["close"]
+        except (KeyError, TypeError, AttributeError) as exc:
+            logger.debug("Close series unavailable for %s: %s", getattr(context, "pair", "unknown"), exc)
+            return None
+
+        try:
+            if hasattr(series, "iloc"):
+                value = series.iloc[-1]
+            else:
+                value = series[-1]  # type: ignore[index]
+            return float(value)
+        except (TypeError, ValueError, IndexError) as exc:
+            logger.debug("Failed to extract latest close for %s: %s", getattr(context, "pair", "unknown"), exc)
+            return None
+
+    @staticmethod
     def _calculate_volume(
         signal: StrategySignal,
         context: StrategyContext,
@@ -399,7 +432,12 @@ class RiskManager:
     ) -> Optional[float]:
         """Derive trade volume based on balances and configured risk fraction."""
         balances = context.account_balances or {}
-        close_price = float(context.ohlcv["close"].iloc[-1])
+
+        close_price = RiskManager._latest_close_price(context)
+        if close_price is None or close_price <= 0:
+            logger.debug("Unable to determine close price for %s; skipping position sizing.", context.pair)
+            return None
+
         position_fraction = float(limits["position_size"])
 
         pair = context.pair

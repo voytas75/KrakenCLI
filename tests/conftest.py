@@ -21,6 +21,10 @@ except ModuleNotFoundError:  # pragma: no cover - executed when pandas missing
                 return [int(value) for value in self]
             return list(self)
 
+        @property
+        def iloc(self):  # type: ignore[override]
+            return self
+
     class _FakeDataFrame:
         """Small subset of pandas.DataFrame used in trading engine tests."""
 

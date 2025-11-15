@@ -3,12 +3,15 @@ Automated trading commands for KrakenCLI.
 
 Encapsulates the auto-trading lifecycle commands and related helpers so the
 entry module stays manageable.
+
+Updates: v0.9.5 - 2025-11-15 - Resolve engine hooks via entry module for testability.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
@@ -69,6 +72,19 @@ def _format_auto_dependency_error(exc: Exception) -> str:
     if isinstance(exc, ModuleNotFoundError):
         return f"{message}. {hint}"
     return f"{message}. {hint}"
+
+
+def _resolve_entry_function(name: str, fallback: Callable[..., Any]) -> Callable[..., Any]:
+    """Return entry module attribute when present; otherwise use fallback."""
+
+    try:
+        entry_module = import_module("kraken_cli")
+        candidate = getattr(entry_module, name, None)
+        if callable(candidate):
+            return candidate
+    except Exception as exc:  # pragma: no cover - defensive import guard
+        logger.debug("Failed to resolve %s from entry module: %s", name, exc)
+    return fallback
 
 
 def _create_strategy_manager(config_obj: Config):
@@ -294,7 +310,8 @@ def register(
     ) -> None:
         """Start the automated trading engine."""
 
-        engine = _create_trading_engine(
+        engine_factory = _resolve_entry_function("_create_trading_engine", _create_trading_engine)
+        engine = engine_factory(
             ctx,
             console=console,
             config=config,
@@ -313,7 +330,10 @@ def register(
         )
 
         try:
-            _display_auto_start_summary(
+            summary_renderer = _resolve_entry_function(
+                "_display_auto_start_summary", _display_auto_start_summary
+            )
+            summary_renderer(
                 console=console,
                 engine=engine,
                 strategy_keys=strategy_keys,
