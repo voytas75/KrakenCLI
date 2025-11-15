@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from click.testing import CliRunner
 
 import kraken_cli
@@ -56,3 +58,34 @@ def test_portfolio_command_handles_missing_assets(monkeypatch) -> None:
     assert "Total Portfolio Value" in result.output
     assert "No USD pricing available" in result.output
     assert "Open Positions" in result.output
+
+
+def test_portfolio_command_save_snapshot(monkeypatch, tmp_path) -> None:
+    runner = CliRunner()
+
+    summary = {
+        "significant_assets": [
+            {"asset": "XXBT", "amount": "0.10", "usd_value": 6200.0},
+        ],
+        "total_usd_value": 6200.0,
+        "missing_assets": [],
+        "open_positions_count": 0,
+        "open_orders_count": 0,
+        "total_assets": 1,
+    }
+
+    portfolio_stub = _StubPortfolio(summary, positions={})
+
+    _install_api_client(monkeypatch)
+    _install_portfolio(monkeypatch, portfolio_stub)
+
+    monkeypatch.setattr("cli.portfolio.SNAPSHOT_DIR", tmp_path)
+
+    result = runner.invoke(kraken_cli.cli, ["portfolio", "--save"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+
+    files = list(tmp_path.glob("*.json"))
+    assert len(files) == 1
+    saved_payload = json.loads(files[0].read_text(encoding="utf-8"))
+    assert saved_payload["total_usd_value"] == summary["total_usd_value"]

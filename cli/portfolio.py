@@ -7,6 +7,10 @@ open positions using Rich tables.
 
 from __future__ import annotations
 
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 import click
@@ -16,6 +20,10 @@ from rich.table import Table
 from api.kraken_client import KrakenAPIClient
 from portfolio.portfolio_manager import PortfolioManager
 from utils.helpers import format_asset_amount, format_currency
+
+logger = logging.getLogger(__name__)
+
+SNAPSHOT_DIR = Path("logs") / "portfolio" / "snapshots"
 
 
 def register(
@@ -69,12 +77,30 @@ def register(
         ctx.obj["portfolio"] = portfolio
         return portfolio
 
+    def _write_snapshot(summary: dict[str, Any]) -> Optional[Path]:
+        """Persist summary payload to the snapshot directory."""
+        try:
+            SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            file_path = SNAPSHOT_DIR / f"portfolio_{timestamp}.json"
+            file_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+            return file_path
+        except Exception as exc:  # pragma: no cover - defensive file system guard
+            logger.error("Failed to write portfolio snapshot: %s", exc)
+            return None
+
     @cli_group.command()
     @click.option("--pair", "-p", help="Filter by trading pair")
+    @click.option(
+        "--save",
+        is_flag=True,
+        help="Save portfolio summary to logs/portfolio/snapshots/",
+    )
     @click.pass_context
     def portfolio(  # type: ignore[unused-ignore]
         ctx: click.Context,
         pair: Optional[str],
+        save: bool,
     ) -> None:
         """Show portfolio overview."""
 
@@ -128,6 +154,13 @@ def register(
                 if missing_assets:
                     formatted_missing = ", ".join(sorted(set(missing_assets)))
                     console.print(f"[yellow]⚠️  No USD pricing available for: {formatted_missing}[/yellow]")
+
+            if save and summary:
+                snapshot_path = _write_snapshot(summary)
+                if snapshot_path is not None:
+                    console.print(f"[green]✅ Snapshot saved to {snapshot_path}[/green]")
+                else:
+                    console.print("[red]❌ Failed to save portfolio snapshot.[/red]")
 
             positions = portfolio_manager.get_open_positions()
             if positions:
