@@ -450,7 +450,18 @@ class PortfolioManager:
         """Return parsed 30-day volume and fee tier information."""
 
         try:
-            response = self.api_client.get_trade_volume(pair=candidate_pairs, include_fee_info=True)
+            payload_pairs: Optional[Sequence[str]]
+            if candidate_pairs:
+                compact: List[str] = []
+                for item in candidate_pairs:
+                    if not item:
+                        continue
+                    compact.append(item.replace('/', ''))
+                payload_pairs = compact or candidate_pairs
+            else:
+                payload_pairs = None
+
+            response = self.api_client.get_trade_volume(pair=payload_pairs, include_fee_info=True)
         except Exception as exc:
             logger.debug("Failed to fetch trade volume for fee status: %s", exc)
             return {}
