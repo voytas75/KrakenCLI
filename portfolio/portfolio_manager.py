@@ -361,7 +361,9 @@ class PortfolioManager:
             total_usd_value = total_value if significant_assets else None
 
             unique_pairs = self._dedupe_preserve_order(pair_candidates)[:10]
-            fee_status = self.get_fee_status(unique_pairs if unique_pairs else None)
+            if not unique_pairs:
+                unique_pairs = ["XXBTZUSD"]
+            fee_status = self.get_fee_status(unique_pairs)
 
             return {
                 'total_usd_value': total_usd_value,
