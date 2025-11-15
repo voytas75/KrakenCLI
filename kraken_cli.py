@@ -430,7 +430,6 @@ def status(ctx):
         balance = api_client.get_account_balance()
         
         console.print("[green]✅ Connection successful![/green]")
-        console.print(f"[bold white]Logger Level:[/bold white] [cyan]{_get_active_log_level()}[/cyan]")
         # Get server time from result field (2025 API format: {"error": [], "result": {}})
         server_time = time_info.get('result', {})
         if 'unixtime' in server_time:
