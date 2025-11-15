@@ -59,6 +59,7 @@ def test_portfolio_command_handles_missing_assets(monkeypatch) -> None:
     assert "Total Portfolio Value" in result.output
     assert "No USD pricing available" in result.output
     assert "Open Positions" in result.output
+    assert "Fee status unavailable" in result.output
 
 
 def test_portfolio_command_save_snapshot(monkeypatch, tmp_path) -> None:
@@ -91,6 +92,7 @@ def test_portfolio_command_save_snapshot(monkeypatch, tmp_path) -> None:
     assert len(files) == 1
     saved_payload = json.loads(files[0].read_text(encoding="utf-8"))
     assert saved_payload["total_usd_value"] == summary["total_usd_value"]
+    assert "Fee status unavailable" in result.output
 
 
 def test_portfolio_command_compare_snapshot(monkeypatch, tmp_path) -> None:
@@ -138,6 +140,7 @@ def test_portfolio_command_compare_snapshot(monkeypatch, tmp_path) -> None:
     assert "Portfolio Comparison" in result.output
     assert "+USD 200.00" in result.output
     assert "+0.01" in result.output
+    assert "Fee status unavailable" in result.output
 
 
 def test_portfolio_command_displays_fee_status(monkeypatch) -> None:

@@ -284,7 +284,7 @@ def register(
                     formatted_missing = ", ".join(sorted(set(missing_assets)))
                     console.print(f"[yellow]⚠️  No USD pricing available for: {formatted_missing}[/yellow]")
 
-            fee_status = summary.get("fee_status") if summary else {}
+            fee_status = summary.get("fee_status") if summary else None
             if fee_status:
                 console.print("\n[bold blue]Fee Status[/bold blue]")
                 fee_table = Table()
@@ -313,6 +313,10 @@ def register(
                 fee_table.add_row("Volume For Next Tier", next_volume_text)
 
                 console.print(fee_table)
+            elif fee_status == {}:
+                console.print(
+                    "[yellow]ℹ️  Fee status unavailable (Kraken did not return fee data for this account or pair set).[/yellow]"
+                )
 
             if save and summary:
                 snapshot_path = _write_snapshot(summary)
