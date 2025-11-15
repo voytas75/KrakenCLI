@@ -4,6 +4,7 @@ Portfolio management for Kraken trading.
 Updates: v0.9.4 - 2025-11-12 - Added cache refresh helpers for order and ledger data.
 Updates: v0.9.5 - 2025-11-15 - Surface raw fee status responses for debug consumers.
 Updates: v0.9.6 - 2025-11-16 - Preserve raw balance amounts in portfolio summaries.
+Updates: v0.9.7 - 2025-11-17 - Validate fee status pairs against Kraken AssetPairs metadata.
 """
 
 import logging
@@ -27,6 +28,7 @@ class PortfolioManager:
         self._asset_pairs_by_key: Dict[Tuple[str, str], List[str]] = {}
         self._known_pair_identifiers: Set[str] = set()
         self._pair_display_cache: Dict[Tuple[str, str], str] = {}
+        self._pair_identifier_map: Dict[str, str] = {}
 
     def _load_asset_metadata(self) -> None:
         """Load asset metadata and cache alt names for price lookups."""
@@ -75,8 +77,10 @@ class PortfolioManager:
             altname = payload.get('altname')
             wsname = payload.get('wsname')
 
-            if pair_name:
-                names.append(str(pair_name).upper())
+            canonical_pair = str(pair_name).upper() if pair_name else None
+
+            if canonical_pair:
+                names.append(canonical_pair)
             if altname:
                 names.append(str(altname).upper())
             if wsname:
@@ -86,6 +90,21 @@ class PortfolioManager:
             deduped = self._dedupe_preserve_order(names)
             bucket[:] = deduped
             self._known_pair_identifiers.update(deduped)
+
+            canonical_payload = canonical_pair or (str(altname).upper() if altname else None)
+            if canonical_payload:
+                compact_canonical = canonical_payload.replace('/', '')
+            else:
+                compact_canonical = None
+
+            for alias in deduped:
+                normalized_alias = self._normalize_pair_identifier(alias)
+                if not normalized_alias:
+                    continue
+                if compact_canonical:
+                    self._pair_identifier_map[normalized_alias] = compact_canonical
+                else:
+                    self._pair_identifier_map.setdefault(normalized_alias, normalized_alias)
 
             display_value = wsname or altname or pair_name
             if display_value:
@@ -111,6 +130,7 @@ class PortfolioManager:
         self._asset_pairs_by_key.clear()
         self._known_pair_identifiers.clear()
         self._pair_display_cache.clear()
+        self._pair_identifier_map.clear()
 
     @staticmethod
     def _to_float(value: Any) -> Optional[float]:
@@ -216,6 +236,41 @@ class PortfolioManager:
                 pairs.append(compact)
 
         return self._dedupe_preserve_order(pairs)
+
+    @staticmethod
+    def _normalize_pair_identifier(value: Optional[str]) -> str:
+        """Return uppercase Kraken pair identifier stripped of separators."""
+
+        if not value:
+            return ""
+        normalized = str(value).upper().replace(" ", "")
+        normalized = normalized.replace('-', '')
+        return normalized.replace('/', '')
+
+    def _filter_valid_trade_pairs(self, candidate_pairs: Optional[Sequence[str]]) -> List[str]:
+        """Filter candidate pairs down to Kraken-supported identifiers."""
+
+        if not candidate_pairs:
+            return []
+
+        self._load_asset_pairs()
+        filtered: List[str] = []
+
+        if not self._pair_identifier_map:
+            sanitized = [self._normalize_pair_identifier(pair) for pair in candidate_pairs]
+            sanitized = [pair for pair in sanitized if pair]
+            return self._dedupe_preserve_order(sanitized)
+
+        for pair in candidate_pairs:
+            key = self._normalize_pair_identifier(pair)
+            if not key:
+                continue
+            canonical = self._pair_identifier_map.get(key)
+            if not canonical:
+                continue
+            filtered.append(canonical)
+
+        return self._dedupe_preserve_order(filtered)
 
     def _get_price_for_pairs(self, candidate_pairs: List[str]) -> Optional[float]:
         """Attempt to find a USD price for the provided pair candidates."""
@@ -487,13 +542,15 @@ class PortfolioManager:
 
         try:
             payload_pairs: Optional[Sequence[str]]
-            if candidate_pairs:
-                compact: List[str] = []
-                for item in candidate_pairs:
-                    if not item:
-                        continue
-                    compact.append(item.replace('/', ''))
-                payload_pairs = compact or candidate_pairs
+            valid_pairs = self._filter_valid_trade_pairs(candidate_pairs)
+            if valid_pairs:
+                payload_pairs = valid_pairs
+            elif candidate_pairs:
+                payload_pairs = None
+                logger.debug(
+                    "No valid Kraken trading pairs matched %s; requesting aggregate fee status.",
+                    candidate_pairs,
+                )
             else:
                 payload_pairs = None
 

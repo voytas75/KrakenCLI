@@ -19,6 +19,18 @@ class _StubApiClient:
         self.ticker_calls.append(pair)
         return {"result": {pair: {"c": ["20000.0", ""], "b": ["0", "0"], "a": ["0", "0"]}}}
 
+    def get_asset_pairs(self, pair=None) -> Dict[str, Any]:
+        return {
+            "result": {
+                "XXBTZUSD": {
+                    "altname": "XBTUSD",
+                    "wsname": "XBT/USD",
+                    "base": "XXBT",
+                    "quote": "ZUSD",
+                }
+            }
+        }
+
     def get_account_balance(self) -> Dict[str, Any]:
         return {"result": {"XXBT": "0.5", "ZUSD": "100"}}
 
@@ -82,7 +94,7 @@ def test_portfolio_summary_calculates_usd_values() -> None:
     assert manager.api_client.trade_volume_requests
     first_request = manager.api_client.trade_volume_requests[0]
     assert isinstance(first_request, list)
-    assert all('/' not in pair for pair in first_request)
+    assert first_request == ["XXBTZUSD"]
 
 
 def test_refresh_portfolio_resets_price_cache() -> None:
