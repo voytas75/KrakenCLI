@@ -1,27 +1,25 @@
 # Changelog
 All notable changes to this project are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Planned
-- Extend automated trading test coverage to include risk-state persistence and signal rejection paths.
-- Introduce an automated diagnostics command for optional dependency and configuration checks.
-- Implement adaptive rate limiting tuned to Kraken's endpoint categories.
-
 ### Added
-- Trader balance validation tests for Kraken asset prefixes.
-- Configurable endpoint weights feeding the API client rate limiter.
-- Kraken API client unit tests and coverage utilities for config/rate limiter paths.
-- Additional CLI coverage targeting trading, portfolio, and export command flows.
+- Trader balance validation tests covering Kraken-prefixed asset codes.
+- Configuration support for weighted Kraken endpoint costs in the rate limiter.
+- Kraken API client session tests, trader execution tests, and config endpoint weight coverage additions.
+- Additional CLI automation coverage for trading, portfolio, and export commands.
+- `ohlc` CLI command for fetching candlestick data with table or JSON output.
 
 ### Changed
-- `run_tests.sh` now runs coverage and fails when overall coverage falls below 80%.
-- Introduced `.coveragerc` exclusions for optional automation, strategy, and CLI utility modules.
+- `run_tests.sh` now enforces ≥80% coverage via the coverage CLI.
+- Added `.coveragerc` to exclude optional automation and CLI utility modules from coverage calculations.
 
-### Changed
-- `run_tests.sh` now executes the comprehensive suite plus pytest coverage for rate limits, automation, and CLI behaviour.
+### Planned
+- Expand automated trading test coverage (engine cycles, strategy signals, risk persistence).
+- Implement dynamic rate limiter aligned with configurable thresholds.
+- Add diagnostics command to verify optional dependencies and configuration health.
 
 ## [0.9.7] - 2025-11-13
 
@@ -36,10 +34,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [0.9.6] - 2025-11-13
 
 ### Added
-- Refreshed project blueprint describing alerts, automation, and risk architecture.
+- Introduced refreshed project blueprint documenting alerts, automation, and risk modules.
 
 ### Changed
-- `README.md` project structure now mirrors the authoritative layout from AGENTS guidance.
+- Updated `README.md` project structure section to align with AGENTS guidance.
 
 ## [0.9.5] - 2025-11-13
 
