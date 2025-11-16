@@ -262,6 +262,66 @@ def _count_existing_bars(
     return total
 
 
+def _get_max_existing_time(
+    conn: sqlite3.Connection,
+    pair: str,
+    timeframe_minutes: int,
+) -> Optional[int]:
+    """Return the maximum time present for a pair/timeframe.
+
+    Args:
+        conn: SQLite connection.
+        pair: Trading pair identifier (e.g., 'ETHUSD').
+        timeframe_minutes: Interval length in minutes.
+
+    Returns:
+        The greatest epoch time stored for the pair/timeframe, or None if
+        no rows exist.
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT MAX(time) FROM ohlc_bars WHERE pair=? AND timeframe_minutes=?",
+            (pair, timeframe_minutes),
+        )
+        row = cursor.fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+    except sqlite3.Error as exc:
+        logger.debug("Failed to get MAX(time): %s", exc)
+        return None
+
+
+def _has_bars_since(
+    conn: sqlite3.Connection,
+    pair: str,
+    timeframe_minutes: int,
+    start_ts: int,
+) -> bool:
+    """Return True if DB has any bars at or after start_ts for pair/timeframe.
+
+    Args:
+        conn: SQLite connection.
+        pair: Trading pair identifier.
+        timeframe_minutes: Interval length in minutes.
+        start_ts: Start epoch seconds (inclusive).
+
+    Returns:
+        True when at least one row exists with time >= start_ts.
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT EXISTS(SELECT 1 FROM ohlc_bars "
+            "WHERE pair=? AND timeframe_minutes=? AND time >= ? LIMIT 1)",
+            (pair, timeframe_minutes, start_ts),
+        )
+        row = cursor.fetchone()
+        return bool(row[0]) if row else False
+    except sqlite3.Error as exc:
+        logger.debug("has_bars_since check failed: %s", exc)
+        return False
+
+
 def register(
     cli_group: click.Group,
     *,
@@ -408,6 +468,29 @@ def register(
         # Rely on the entrypoint's call_with_retries progress rendering instead.
         while True:
             prev_since = current_since
+
+            # DB pre-check: if DB already has bars at or beyond current_since,
+            # advance since past the max and skip API request for this iteration.
+            existing_max = _get_max_existing_time(conn, request_pair, interval_minutes)
+            if existing_max is not None and existing_max >= current_since:
+                next_since = existing_max + 1
+                if logger.isEnabledFor(logging.DEBUG):
+                    console.print(
+                        f"[dim]DB coverage up to {existing_max}; "
+                        f"advancing since {current_since} → {next_since} "
+                        f"(no API request)[/dim]"
+                    )
+                    logger.debug(
+                        "DB coverage up to %d; advancing since from %d to %d",
+                        existing_max,
+                        current_since,
+                        next_since,
+                    )
+                current_since = next_since
+                if current_since >= end_ts:
+                    break
+                continue
+
             # Try multiple Kraken pair key variants for robustness
             candidates = candidate_pair_keys(request_pair)
             selected_bars: List[Any] = []
