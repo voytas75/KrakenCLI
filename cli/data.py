@@ -217,6 +217,51 @@ def _insert_bars(
     return cursor.rowcount
 
 
+def _count_existing_bars(
+    conn: sqlite3.Connection,
+    pair: str,
+    timeframe_minutes: int,
+    times: Iterable[int],
+) -> int:
+    """Count existing OHLC rows for given (pair, timeframe, time) keys.
+
+    Args:
+        conn: SQLite connection.
+        pair: Trading pair identifier (e.g., 'ETHUSD').
+        timeframe_minutes: Interval length in minutes.
+        times: Iterable of epoch times to check.
+
+    Returns:
+        Number of rows already present in the database for the provided keys.
+    """
+    ts_list = list(times)
+    if not ts_list:
+        return 0
+
+    # Chunk IN() parameter list to avoid excessive parameter counts
+    chunk_size = 500
+    total = 0
+    cursor = conn.cursor()
+
+    for i in range(0, len(ts_list), chunk_size):
+        chunk = ts_list[i : i + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        query = (
+            f"SELECT COUNT(1) FROM ohlc_bars "
+            f"WHERE pair=? AND timeframe_minutes=? AND time IN ({placeholders})"
+        )
+        params: List[Any] = [pair, timeframe_minutes, *chunk]
+        try:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            total += int(row[0]) if row and row[0] is not None else 0
+        except sqlite3.Error as exc:
+            logger.debug("Existing bars count failed: %s", exc)
+            break
+
+    return total
+
+
 def register(
     cli_group: click.Group,
     *,
@@ -420,6 +465,21 @@ def register(
             time.sleep(1.05)
 
             if not selected_bars:
+                # Debug: explain absence of bars for current window/candidates
+                if logger.isEnabledFor(logging.DEBUG):
+                    console.print(
+                        f"[dim]No bars fetched for {request_pair}; "
+                        f"since={current_since}, last={last_ts} "
+                        f"(candidates tried: {', '.join(candidates)})[/dim]"
+                    )
+                    logger.debug(
+                        "No bars fetched for %s; since=%d last=%d; candidates=%s",
+                        request_pair,
+                        current_since,
+                        last_ts,
+                        ",".join(candidates),
+                    )
+
                 if last_ts == 0:
                     console.print("[yellow]ℹ️ No more data available[/yellow]")
                     break
@@ -465,6 +525,36 @@ def register(
                     current_since,
                     last_ts,
                 )
+
+                # If no bars were inserted but we did fetch bars,
+                # explain likely cause (duplicates already present in DB)
+                if inserted == 0 and selected_bars:
+                    try:
+                        existing_count = _count_existing_bars(
+                            conn,
+                            request_pair,
+                            interval_minutes,
+                            [int(b[0]) for b in selected_bars],
+                        )
+                    except Exception as exc:
+                        existing_count = 0
+                        logger.debug("Existing count check failed: %s", exc)
+
+                    new_keys = max(0, len(selected_bars) - existing_count)
+                    console.print(
+                        f"[dim]Fetched {len(selected_bars)} bars; "
+                        f"inserted=0 (duplicates in DB={existing_count}, new={new_keys}).[/dim]"
+                    )
+                    logger.debug(
+                        "Fetched %d bars; inserted=0; duplicates=%d, new=%d for %s "
+                        "between %d and %d",
+                        len(selected_bars),
+                        existing_count,
+                        new_keys,
+                        (selected_pair or request_pair),
+                        prev_since,
+                        current_since,
+                    )
 
             # Stop when we reached or passed the end window
             if current_since >= end_ts:
