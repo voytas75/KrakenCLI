@@ -43,6 +43,7 @@ from cli import automation as automation_commands
 from cli import export as export_commands
 from cli import portfolio as portfolio_commands
 from cli import trading as trading_commands
+from cli import patterns as patterns_commands
 # Load environment variables
 load_dotenv()
 
@@ -344,6 +345,13 @@ trading_commands.register(
 )
 
 portfolio_commands.register(
+    cli,
+    console=console,
+    config=config,
+    call_with_retries=_call_with_retries,
+)
+
+patterns_commands.register(
     cli,
     console=console,
     config=config,
