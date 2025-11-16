@@ -463,6 +463,7 @@ def register(
         inserted_total = 0
         request_count = 0
         current_since = start_ts
+        stall_count = 0
 
         # Avoid nested Rich Live/Progress contexts to prevent runtime errors.
         # Rely on the entrypoint's call_with_retries progress rendering instead.
@@ -473,7 +474,8 @@ def register(
             # advance since past the max and skip API request for this iteration.
             existing_max = _get_max_existing_time(conn, request_pair, interval_minutes)
             if existing_max is not None and existing_max >= current_since:
-                next_since = existing_max + 1
+                step = max(1, interval_minutes * 60)
+                next_since = existing_max + step
                 if logger.isEnabledFor(logging.DEBUG):
                     console.print(
                         f"[dim]DB coverage up to {existing_max}; "
@@ -481,10 +483,11 @@ def register(
                         f"(no API request)[/dim]"
                     )
                     logger.debug(
-                        "DB coverage up to %d; advancing since from %d to %d",
+                        "DB coverage up to %d; advancing since from %d to %d (step=%d)",
                         existing_max,
                         current_since,
                         next_since,
+                        step,
                     )
                 current_since = next_since
                 if current_since >= end_ts:
@@ -571,6 +574,31 @@ def register(
                 current_since = current_since + step
                 continue
 
+            # Deduplicate against DB before insert: skip if all fetched bars already exist
+            existing_max_loop = _get_max_existing_time(conn, request_pair, interval_minutes)
+            if existing_max_loop is not None:
+                filtered_bars = [
+                    b for b in selected_bars if int(b[0]) > existing_max_loop
+                ]
+                if not filtered_bars:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        console.print(
+                            f"[dim]All fetched bars already in DB; "
+                            f"skipping insert (max={existing_max_loop})[/dim]"
+                        )
+                        logger.debug(
+                            "All fetched bars already in DB for %s at since=%d (max=%d)",
+                            request_pair,
+                            current_since,
+                            existing_max_loop,
+                        )
+                    # Advance by one interval to avoid repeated duplicates
+                    current_since = prev_since + max(1, interval_minutes * 60)
+                    if current_since >= end_ts:
+                        break
+                    continue
+                selected_bars = filtered_bars
+
             try:
                 # Store under normalized pair key for consistency
                 inserted = _insert_bars(
@@ -588,8 +616,8 @@ def register(
                 break
 
             if last_ts <= current_since:
-                # Advance slightly to avoid equality stalls
-                current_since = current_since + 1
+                # Advance by one candle interval to avoid stalls on duplicate/older data
+                current_since = prev_since + max(1, interval_minutes * 60)
             else:
                 current_since = last_ts
 
@@ -638,6 +666,24 @@ def register(
                         prev_since,
                         current_since,
                     )
+
+            # Detect repeated duplicate/old data stalls to avoid rate limits
+            if inserted == 0 and last_ts <= prev_since:
+                stall_count += 1
+            else:
+                stall_count = 0
+            if stall_count >= 3:
+                console.print(
+                    "[yellow]ℹ️ Detected repeated duplicate/old data; "
+                    "stopping to avoid rate limits[/yellow]"
+                )
+                logger.debug(
+                    "Stopping after %d consecutive stalls (last_ts=%d, prev_since=%d)",
+                    stall_count,
+                    last_ts,
+                    prev_since,
+                )
+                break
 
             # Stop when we reached or passed the end window
             if current_since >= end_ts:
