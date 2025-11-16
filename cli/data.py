@@ -358,77 +358,63 @@ def register(
         request_count = 0
         current_since = start_ts
 
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("{task.description}"),
-            transient=True,
-            console=console,
-        )
+        # Avoid nested Rich Live/Progress contexts to prevent runtime errors.
+        # Rely on the entrypoint's call_with_retries progress rendering instead.
+        while True:
+            def _fetch() -> Dict[str, Any]:
+                return api_client.get_ohlc_data(
+                    pair=pair, interval=interval_minutes, since=current_since
+                )
 
-        with progress:
-            task_id = progress.add_task("Fetching OHLC…", start=False)
-
-            while True:
-                progress.update(
-                    task_id,
-                    description=(
-                        f"Fetching OHLC (request {request_count + 1}) "
-                        f"since {current_since}"
+            try:
+                payload = call_with_retries(
+                    _fetch,
+                    "OHLC fetch",
+                    display_label=(
+                        f"OHLC {pair} {interval_minutes}m since {current_since}"
                     ),
                 )
-                progress.start_task(task_id)
+            except Exception as exc:
+                console.print(f"[red]❌ API error: {exc}[/red]")
+                break
 
-                def _fetch() -> Dict[str, Any]:
-                    return api_client.get_ohlc_data(
-                        pair=pair, interval=interval_minutes, since=current_since
-                    )
+            request_count += 1
+            result = payload.get("result", {}) if payload else {}
+            bars_iter, resolved_key = resolve_ohlc_payload(pair, result)
+            last_ts_raw = result.get("last")
+            try:
+                last_ts = int(last_ts_raw) if last_ts_raw is not None else 0
+            except (TypeError, ValueError):
+                last_ts = 0
 
-                try:
-                    payload = call_with_retries(
-                        _fetch,
-                        "OHLC fetch",
-                        display_label=f"OHLC {pair} {interval_minutes}m",
-                    )
-                except Exception as exc:
-                    console.print(f"[red]❌ API error: {exc}[/red]")
-                    break
-
-                request_count += 1
-                result = payload.get("result", {}) if payload else {}
-                bars_iter, resolved_key = resolve_ohlc_payload(pair, result)
-                last_ts_raw = result.get("last")
-                try:
-                    last_ts = int(last_ts_raw) if last_ts_raw is not None else 0
-                except (TypeError, ValueError):
-                    last_ts = 0
-
-                if not bars_iter:
-                    # No bars for this request; stop if we cannot advance
-                    if last_ts <= current_since or last_ts == 0:
-                        console.print("[yellow]ℹ️ No more data available[/yellow]")
-                        break
-
-                try:
-                    inserted = _insert_bars(conn, pair, interval_minutes, bars_iter or [])
-                except sqlite3.Error as exc:
-                    console.print(f"[red]❌ DB insert failed: {exc}[/red]")
-                    break
-
-                inserted_total += inserted
-
-                # Determine next window advancement
+            bars_list: List[Any] = list(bars_iter or [])
+            if not bars_list:
+                # No bars for this request; stop if we cannot advance
                 if last_ts <= current_since or last_ts == 0:
-                    # Safety: prevent infinite loop
-                    console.print(
-                        "[yellow]⚠️ Unable to advance 'since' marker; stopping[/yellow]"
-                    )
+                    console.print("[yellow]ℹ️ No more data available[/yellow]")
                     break
 
-                current_since = last_ts
+            try:
+                inserted = _insert_bars(conn, pair, interval_minutes, bars_list)
+            except sqlite3.Error as exc:
+                console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                break
 
-                # Stop when we reached or passed the end window
-                if current_since >= end_ts:
-                    break
+            inserted_total += inserted
+
+            # Determine next window advancement
+            if last_ts <= current_since or last_ts == 0:
+                # Safety: prevent infinite loop
+                console.print(
+                    "[yellow]⚠️ Unable to advance 'since' marker; stopping[/yellow]"
+                )
+                break
+
+            current_since = last_ts
+
+            # Stop when we reached or passed the end window
+            if current_since >= end_ts:
+                break
 
         conn.close()
 
