@@ -345,7 +345,7 @@ def register(
 
         console.print(
             Panel.fit(
-                f"Pair: [cyan]{pair}[/cyan]\n"
+                f"Pair: [cyan]{request_pair}[/cyan]\n"
                 f"Timeframe: [cyan]{timeframe}[/cyan] "
                 f"([green]{interval_minutes} min[/green])\n"
                 f"Window: [cyan]{start_ts}[/cyan] → [cyan]{end_ts}[/cyan]\n"
@@ -362,9 +362,11 @@ def register(
         # Avoid nested Rich Live/Progress contexts to prevent runtime errors.
         # Rely on the entrypoint's call_with_retries progress rendering instead.
         while True:
+            prev_since = current_since
             # Try multiple Kraken pair key variants for robustness
             candidates = candidate_pair_keys(request_pair)
             selected_bars: List[Any] = []
+            selected_pair: Optional[str] = None
             last_ts = 0
 
             for attempt_pair in candidates:
@@ -409,6 +411,7 @@ def register(
 
                 selected_bars = list(bars_iter or [])
                 if selected_bars:
+                    selected_pair = attempt_pair
                     break
 
             # Count one request cycle (may include multiple candidate attempts)
@@ -446,6 +449,22 @@ def register(
                 current_since = current_since + 1
             else:
                 current_since = last_ts
+
+            # Debug progress: per-batch insert details
+            if logger.isEnabledFor(logging.DEBUG):
+                console.print(
+                    f"[dim]Inserted {inserted} bars for "
+                    f"{selected_pair or request_pair}; window "
+                    f"{prev_since} → {current_since} (last={last_ts})[/dim]"
+                )
+                logger.debug(
+                    "Inserted %d bars for %s; window %d → %d; last=%d",
+                    inserted,
+                    (selected_pair or request_pair),
+                    prev_since,
+                    current_since,
+                    last_ts,
+                )
 
             # Stop when we reached or passed the end window
             if current_since >= end_ts:
