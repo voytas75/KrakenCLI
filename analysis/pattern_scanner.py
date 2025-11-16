@@ -2,9 +2,11 @@
 
 This module defines data models and orchestration helpers used to
 scan OHLC data for recurring patterns such as moving-average
-crossovers, RSI extremes, and Bollinger band touches.
+crossovers, RSI extremes, Bollinger band touches, and MACD signal
+crosses.
 
 Updates:
+    v0.9.14 - 2025-11-16 - Added MACD signal cross detector.
     v0.9.13 - 2025-11-16 - Added snapshot YAML export helper.
     v0.9.12 - 2025-11-16 - Added snapshot payload helper and heatmap
         aggregation utilities.
@@ -141,6 +143,7 @@ class PatternScanner:
             "ma_crossover": self._detect_ma_crossover,
             "rsi_extreme": self._detect_rsi_extreme,
             "bollinger_touch": self._detect_bollinger_touch,
+            "macd_signal_cross": self._detect_macd_signal_cross,
         }
 
     def scan_pattern(
@@ -808,4 +811,70 @@ class PatternScanner:
                 ),
             )
 
+        return matches
+    def _detect_macd_signal_cross(
+        self,
+        frame: pd.DataFrame,
+        pair: str,
+        timeframe: int,
+        window: int,
+    ) -> List[PatternMatch]:
+        """Detect MACD line crossing the signal line (bullish/bearish).
+        
+        Bullish signal: MACD crosses above Signal.
+        Bearish signal: MACD crosses below Signal.
+        
+        For each detected cross, compute the percentage move over the
+        specified future window based on close prices.
+        """
+        close = frame["close"]
+        macd_df = self._indicators.macd(close, fast=12, slow=26, signal=9)
+        macd_line = macd_df["macd"]
+        signal_line = macd_df["signal"]
+    
+        matches: List[PatternMatch] = []
+        for idx in range(1, len(frame)):
+            prev_macd = macd_line.iloc[idx - 1]
+            prev_signal = signal_line.iloc[idx - 1]
+            cur_macd = macd_line.iloc[idx]
+            cur_signal = signal_line.iloc[idx]
+    
+            if any(
+                pd.isna(v)
+                for v in (prev_macd, prev_signal, cur_macd, cur_signal)
+            ):
+                continue
+    
+            direction: Optional[str] = None
+            if prev_macd <= prev_signal and cur_macd > cur_signal:
+                direction = "bullish"
+            elif prev_macd >= prev_signal and cur_macd < cur_signal:
+                direction = "bearish"
+    
+            if direction is None:
+                continue
+    
+            future_index = idx + window
+            if future_index >= len(frame):
+                continue
+    
+            entry_price = float(close.iloc[idx])
+            future_price = float(close.iloc[future_index])
+            if entry_price <= 0.0:
+                continue
+    
+            move_pct = (future_price / entry_price - 1.0) * 100.0
+            matches.append(
+                PatternMatch(
+                    pair=pair,
+                    timeframe=timeframe,
+                    pattern_name="macd_signal_cross",
+                    direction=direction,
+                    triggered_at=float(frame["time"].iloc[idx]),
+                    close_price=entry_price,
+                    move_pct=move_pct,
+                    window=window,
+                ),
+            )
+    
         return matches

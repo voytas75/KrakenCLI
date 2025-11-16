@@ -11,6 +11,7 @@ Responsibilities:
 - Follow existing CLI dependency initialisation/wiring patterns.
 
 Updates:
+    v0.9.14 - 2025-11-16 - Added MACD signal cross pattern support in CLI.
     v0.9.13 - 2025-11-16 - Initial pattern CLI scaffolding with scan and heatmap.
 """
 
@@ -189,7 +190,13 @@ def register(
     @click.option(
         "--pattern",
         type=click.Choice(
-            ["ma_crossover", "rsi_extreme", "bollinger_touch"], case_sensitive=False
+            [
+                "ma_crossover",
+                "rsi_extreme",
+                "bollinger_touch",
+                "macd_signal_cross",
+            ],
+            case_sensitive=False,
         ),
         required=True,
         help="Pattern to scan for.",
@@ -368,7 +375,13 @@ def register(
     @click.option(
         "--pattern",
         type=click.Choice(
-            ["ma_crossover", "rsi_extreme", "bollinger_touch"], case_sensitive=False
+            [
+                "ma_crossover",
+                "rsi_extreme",
+                "bollinger_touch",
+                "macd_signal_cross",
+            ],
+            case_sensitive=False
         ),
         required=True,
         help="Pattern to aggregate.",
