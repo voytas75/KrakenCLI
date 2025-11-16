@@ -24,7 +24,7 @@ from rich.table import Table
 
 from api.kraken_client import KrakenAPIClient
 from config import Config
-from utils.market_data import resolve_ohlc_payload
+from utils.market_data import resolve_ohlc_payload, candidate_pair_keys
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +304,7 @@ def register(
             return
 
         interval_minutes = _parse_timeframe_label(timeframe)
+        request_pair = pair.upper()
 
         now_sec = int(time.time())
         start_ts = _parse_time_input(since)
@@ -361,41 +362,74 @@ def register(
         # Avoid nested Rich Live/Progress contexts to prevent runtime errors.
         # Rely on the entrypoint's call_with_retries progress rendering instead.
         while True:
-            def _fetch() -> Dict[str, Any]:
-                return api_client.get_ohlc_data(
-                    pair=pair, interval=interval_minutes, since=current_since
-                )
+            # Try multiple Kraken pair key variants for robustness
+            candidates = candidate_pair_keys(request_pair)
+            selected_bars: List[Any] = []
+            last_ts = 0
 
-            try:
-                payload = call_with_retries(
-                    _fetch,
-                    "OHLC fetch",
-                    display_label=(
-                        f"OHLC {pair} {interval_minutes}m since {current_since}"
-                    ),
-                )
-            except Exception as exc:
-                console.print(f"[red]❌ API error: {exc}[/red]")
-                break
+            for attempt_pair in candidates:
+                # Stronger, local retry/backoff to respect Kraken public limits
+                retries = 5
+                delay = 2.0
+                payload: Dict[str, Any] | None = None
 
-            request_count += 1
-            result = payload.get("result", {}) if payload else {}
-            bars_iter, resolved_key = resolve_ohlc_payload(pair, result)
-            last_ts_raw = result.get("last")
-            try:
-                last_ts = int(last_ts_raw) if last_ts_raw is not None else 0
-            except (TypeError, ValueError):
-                last_ts = 0
+                while True:
+                    try:
+                        payload = api_client.get_ohlc_data(
+                            pair=attempt_pair,
+                            interval=interval_minutes,
+                            since=current_since,
+                        )
+                        break
+                    except Exception as exc:
+                        msg = str(exc)
+                        if (("Too many requests" in msg) or ("429" in msg)) and retries > 0:
+                            console.print(
+                                f"[yellow]⚠️ Rate limited on {attempt_pair}, "
+                                f"retrying in {delay:.1f}s ({retries} left)…[/yellow]"
+                            )
+                            time.sleep(delay)
+                            delay = min(delay * 2.0, 30.0)
+                            retries -= 1
+                            continue
+                        # Non-retryable or retries exhausted: try next candidate
+                        payload = None
+                        break
 
-            bars_list: List[Any] = list(bars_iter or [])
-            if not bars_list:
-                # No bars for this request; stop if we cannot advance
-                if last_ts <= current_since or last_ts == 0:
-                    console.print("[yellow]ℹ️ No more data available[/yellow]")
+                if not payload:
+                    continue
+
+                result = payload.get("result", {}) if payload else {}
+                bars_iter, _ = resolve_ohlc_payload(attempt_pair, result)
+                last_ts_raw = result.get("last")
+                try:
+                    last_ts = int(last_ts_raw) if last_ts_raw is not None else 0
+                except (TypeError, ValueError):
+                    last_ts = 0
+
+                selected_bars = list(bars_iter or [])
+                if selected_bars:
                     break
 
+            # Count one request cycle (may include multiple candidate attempts)
+            request_count += 1
+            # Be polite to public API: small throttle even on success
+            time.sleep(1.05)
+
+            if not selected_bars:
+                if last_ts == 0:
+                    console.print("[yellow]ℹ️ No more data available[/yellow]")
+                    break
+                # Step forward to avoid stalling when no bars are returned
+                step = max(1, interval_minutes * 60)
+                current_since = current_since + step
+                continue
+
             try:
-                inserted = _insert_bars(conn, pair, interval_minutes, bars_list)
+                # Store under normalized pair key for consistency
+                inserted = _insert_bars(
+                    conn, request_pair, interval_minutes, selected_bars
+                )
             except sqlite3.Error as exc:
                 console.print(f"[red]❌ DB insert failed: {exc}[/red]")
                 break
@@ -403,14 +437,15 @@ def register(
             inserted_total += inserted
 
             # Determine next window advancement
-            if last_ts <= current_since or last_ts == 0:
-                # Safety: prevent infinite loop
-                console.print(
-                    "[yellow]⚠️ Unable to advance 'since' marker; stopping[/yellow]"
-                )
+            if last_ts == 0:
+                console.print("[yellow]ℹ️ No 'last' marker returned; stopping[/yellow]")
                 break
 
-            current_since = last_ts
+            if last_ts <= current_since:
+                # Advance slightly to avoid equality stalls
+                current_since = current_since + 1
+            else:
+                current_since = last_ts
 
             # Stop when we reached or passed the end window
             if current_since >= end_ts:

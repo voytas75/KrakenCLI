@@ -43,7 +43,13 @@ from cli import automation as automation_commands
 from cli import export as export_commands
 from cli import portfolio as portfolio_commands
 from cli import trading as trading_commands
-from cli import patterns as patterns_commands
+try:
+    from cli import patterns as patterns_commands
+except Exception as _patterns_exc:  # pragma: no cover - env-dependent optional dep
+    patterns_commands = None  # type: ignore[assignment]
+    _PATTERNS_IMPORT_ERROR = str(_patterns_exc)
+else:
+    _PATTERNS_IMPORT_ERROR = None
 from cli import data as data_commands
 # Load environment variables
 load_dotenv()
@@ -54,6 +60,14 @@ logger = logging.getLogger(__name__)
 
 # Setup logging
 setup_logging(log_level=config.log_level)
+
+# If patterns import failed due to optional dependencies (e.g., pandas),
+# log a warning but allow the rest of the CLI to function.
+if '_PATTERNS_IMPORT_ERROR' in globals() and _PATTERNS_IMPORT_ERROR:
+    logger.warning(
+        "Patterns CLI disabled due to missing dependency: %s",
+        _PATTERNS_IMPORT_ERROR,
+    )
 
 _MAX_RETRY_ATTEMPTS = config.get_retry_attempts()
 _RETRY_INITIAL_DELAY = config.get_retry_initial_delay()
@@ -351,12 +365,17 @@ portfolio_commands.register(
     config=config,
     call_with_retries=_call_with_retries,
 )
-patterns_commands.register(
-    cli,
-    console=console,
-    config=config,
-    call_with_retries=_call_with_retries,
-)
+if patterns_commands is not None:
+    patterns_commands.register(
+        cli,
+        console=console,
+        config=config,
+        call_with_retries=_call_with_retries,
+    )
+else:
+    logger.info(
+        "Skipping patterns CLI registration (missing optional dependency)"
+    )
 
 data_commands.register(
     cli,
