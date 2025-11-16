@@ -382,7 +382,7 @@ def register(
     )
     @click.option(
         "--window",
-        type=click.IntRange(1, 20),
+        type=click.IntRange(1, 50),
         default=PatternScanner.DEFAULT_MOVE_WINDOW,
         show_default=True,
         help="Future window used by detectors (informational).",
