@@ -6,6 +6,8 @@ crossovers, RSI extremes, Bollinger band touches, and MACD signal
 crosses.
 
 Updates:
+    v0.9.15 - 2025-11-16 - Added candlestick hammer and shooting star
+        detectors.
     v0.9.14 - 2025-11-16 - Added MACD signal cross detector.
     v0.9.13 - 2025-11-16 - Added snapshot YAML export helper.
     v0.9.12 - 2025-11-16 - Added snapshot payload helper and heatmap
@@ -144,6 +146,8 @@ class PatternScanner:
             "rsi_extreme": self._detect_rsi_extreme,
             "bollinger_touch": self._detect_bollinger_touch,
             "macd_signal_cross": self._detect_macd_signal_cross,
+            "candle_hammer": self._detect_candle_hammer,
+            "candle_shooting_star": self._detect_candle_shooting_star,
         }
 
     def scan_pattern(
@@ -877,4 +881,163 @@ class PatternScanner:
                 ),
             )
     
+        return matches
+
+    def _detect_candle_hammer(
+        self,
+        frame: pd.DataFrame,
+        pair: str,
+        timeframe: int,
+        window: int,
+    ) -> List[PatternMatch]:
+        """Detect Hammer candlestick pattern occurrences.
+        
+        The hammer is characterized by a small real body near the top of the
+        range, a long lower shadow (≥2x the body), and a minimal upper shadow.
+        It is interpreted as a potential bullish reversal. This detector
+        focuses on shape heuristics without requiring an explicit trend filter.
+        
+        Args:
+            frame: OHLC dataframe with columns: time, open, high, low, close.
+            pair: Trading pair label (e.g., 'ETHUSD').
+            timeframe: Candle interval in minutes.
+            window: Future window used to compute subsequent move in percent.
+        
+        Returns:
+            List of PatternMatch entries for detected hammer shapes.
+        """
+        matches: List[PatternMatch] = []
+        open_s = frame["open"]
+        close_s = frame["close"]
+        high_s = frame["high"]
+        low_s = frame["low"]
+        
+        for idx in range(len(frame)):
+            o = open_s.iloc[idx]
+            c = close_s.iloc[idx]
+            h = high_s.iloc[idx]
+            l = low_s.iloc[idx]
+            
+            if any(pd.isna(v) for v in (o, c, h, l)):
+                continue
+            
+            body = abs(c - o)
+            rng = h - l
+            if rng <= 0.0 or body <= 0.0:
+                continue
+            
+            lower_shadow = min(o, c) - l
+            upper_shadow = h - max(o, c)
+            
+            is_hammer = (
+                lower_shadow >= 2.0 * body
+                and upper_shadow <= 0.3 * body
+                and (body / rng) <= 0.4
+                and (max(o, c) - l) / rng >= 0.6
+            )
+            if not is_hammer:
+                continue
+            
+            future_index = idx + window
+            if future_index >= len(frame):
+                continue
+            
+            entry_price = float(close_s.iloc[idx])
+            future_price = float(close_s.iloc[future_index])
+            if entry_price <= 0.0:
+                continue
+            
+            move_pct = (future_price / entry_price - 1.0) * 100.0
+            matches.append(
+                PatternMatch(
+                    pair=pair,
+                    timeframe=timeframe,
+                    pattern_name="candle_hammer",
+                    direction="bullish",
+                    triggered_at=float(frame["time"].iloc[idx]),
+                    close_price=entry_price,
+                    move_pct=move_pct,
+                    window=window,
+                ),
+            )
+        
+        return matches
+
+    def _detect_candle_shooting_star(
+        self,
+        frame: pd.DataFrame,
+        pair: str,
+        timeframe: int,
+        window: int,
+    ) -> List[PatternMatch]:
+        """Detect Shooting Star candlestick pattern occurrences.
+        
+        The shooting star is characterized by a small real body near the
+        bottom of the range, a long upper shadow (≥2x the body), and minimal
+        lower shadow. It is interpreted as a potential bearish reversal.
+        
+        Args:
+            frame: OHLC dataframe with columns: time, open, high, low, close.
+            pair: Trading pair label (e.g., 'ETHUSD').
+            timeframe: Candle interval in minutes.
+            window: Future window used to compute subsequent move in percent.
+        
+        Returns:
+            List of PatternMatch entries for detected shooting star shapes.
+        """
+        matches: List[PatternMatch] = []
+        open_s = frame["open"]
+        close_s = frame["close"]
+        high_s = frame["high"]
+        low_s = frame["low"]
+        
+        for idx in range(len(frame)):
+            o = open_s.iloc[idx]
+            c = close_s.iloc[idx]
+            h = high_s.iloc[idx]
+            l = low_s.iloc[idx]
+            
+            if any(pd.isna(v) for v in (o, c, h, l)):
+                continue
+            
+            body = abs(c - o)
+            rng = h - l
+            if rng <= 0.0 or body <= 0.0:
+                continue
+            
+            upper_shadow = h - max(o, c)
+            lower_shadow = min(o, c) - l
+            
+            is_shooting_star = (
+                upper_shadow >= 2.0 * body
+                and lower_shadow <= 0.3 * body
+                and (body / rng) <= 0.4
+                and (min(o, c) - l) / rng <= 0.4
+            )
+            if not is_shooting_star:
+                continue
+            
+            future_index = idx + window
+            if future_index >= len(frame):
+                continue
+            
+            entry_price = float(close_s.iloc[idx])
+            future_price = float(close_s.iloc[future_index])
+            if entry_price <= 0.0:
+                continue
+            
+            move_pct = (future_price / entry_price - 1.0) * 100.0
+            matches.append(
+                PatternMatch(
+                    pair=pair,
+                    timeframe=timeframe,
+                    pattern_name="candle_shooting_star",
+                    direction="bearish",
+                    triggered_at=float(frame["time"].iloc[idx]),
+                    close_price=entry_price,
+                    move_pct=move_pct,
+                    window=window,
+                ),
+            )
+        
         return matches

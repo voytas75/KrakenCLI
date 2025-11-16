@@ -11,6 +11,8 @@ Responsibilities:
 - Follow existing CLI dependency initialisation/wiring patterns.
 
 Updates:
+    v0.9.15 - 2025-11-16 - Added candlestick hammer and shooting star
+        patterns in CLI.
     v0.9.14 - 2025-11-16 - Added MACD signal cross pattern support in CLI.
     v0.9.13 - 2025-11-16 - Initial pattern CLI scaffolding with scan and heatmap.
 """
@@ -195,6 +197,8 @@ def register(
                 "rsi_extreme",
                 "bollinger_touch",
                 "macd_signal_cross",
+                "candle_hammer",
+                "candle_shooting_star",
             ],
             case_sensitive=False,
         ),
@@ -380,6 +384,8 @@ def register(
                 "rsi_extreme",
                 "bollinger_touch",
                 "macd_signal_cross",
+                "candle_hammer",
+                "candle_shooting_star",
             ],
             case_sensitive=False
         ),
