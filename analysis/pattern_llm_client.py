@@ -195,6 +195,7 @@ class PatternLLMClient:
             "- Reliability notes based on sample sizes\n"
             "- Practical cautions (e.g., regime changes, day/time biases)\n\n"
             "Constraints:\n"
+            "- Suggest one actionable insight for deeper analysis based on the data\n"
             "- Plain text only (no JSON, no markdown)\n"
             "- Do not provide financial advice\n"
             "- Include a safety disclaimer: 'Past performance does not guarantee "
