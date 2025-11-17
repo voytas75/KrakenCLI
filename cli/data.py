@@ -844,29 +844,10 @@ def register(
         while True:
             prev_since = current_since
 
-            # DB pre-check: if DB already has bars at or beyond current_since,
-            # advance since past the max and skip API request for this iteration.
-            existing_max = _get_max_existing_time(conn, request_pair, interval_minutes)
-            if existing_max is not None and existing_max >= current_since:
-                step = max(1, interval_minutes * 60)
-                next_since = existing_max + step
-                if logger.isEnabledFor(logging.DEBUG):
-                    console.print(
-                        f"[dim]DB coverage up to {existing_max}; "
-                        f"advancing since {current_since} → {next_since} "
-                        f"(no API request)[/dim]"
-                    )
-                    logger.debug(
-                        "DB coverage up to %d; advancing since from %d to %d (step=%d)",
-                        existing_max,
-                        current_since,
-                        next_since,
-                        step,
-                    )
-                current_since = next_since
-                if current_since >= end_ts:
-                    break
-                continue
+            # Removed previous pre-check that skipped API calls based on global
+            # MAX(time). It caused missed backfills when DB had only later data
+            # beyond the requested window. Always fetch from current_since and
+            # rely on PK upsert for deduplication.
 
             # Try multiple Kraken pair key variants for robustness
             candidates = candidate_pair_keys(request_pair)
@@ -954,30 +935,37 @@ def register(
                 current_since = current_since + step
                 continue
 
-            # Deduplicate against DB before insert: skip if all fetched bars already exist
-            existing_max_loop = _get_max_existing_time(conn, request_pair, interval_minutes)
-            if existing_max_loop is not None:
-                filtered_bars = [
-                    b for b in selected_bars if int(b[0]) > existing_max_loop
-                ]
-                if not filtered_bars:
-                    if logger.isEnabledFor(logging.DEBUG):
-                        console.print(
-                            f"[dim]All fetched bars already in DB; "
-                            f"skipping insert (max={existing_max_loop})[/dim]"
-                        )
-                        logger.debug(
-                            "All fetched bars already in DB for %s at since=%d (max=%d)",
-                            request_pair,
-                            current_since,
-                            existing_max_loop,
-                        )
-                    # Advance by one interval to avoid repeated duplicates
-                    current_since = prev_since + max(1, interval_minutes * 60)
-                    if current_since >= end_ts:
-                        break
-                    continue
-                selected_bars = filtered_bars
+            # Deduplicate against DB before insert: skip only if all fetched bars
+            # already exist. Do NOT filter by global MAX(time) because DB may
+            # contain later candles while earlier ones are missing.
+            try:
+                existing_count = _count_existing_bars(
+                    conn,
+                    request_pair,
+                    interval_minutes,
+                    [int(b[0]) for b in selected_bars],
+                )
+            except Exception as exc:
+                existing_count = 0
+                logger.debug("Existing count check failed: %s", exc)
+
+            if existing_count >= len(selected_bars):
+                if logger.isEnabledFor(logging.DEBUG):
+                    console.print(
+                        f"[dim]All fetched bars already in DB; "
+                        f"skipping insert (count={existing_count})[/dim]"
+                    )
+                    logger.debug(
+                        "All fetched bars already in DB for %s at since=%d (count=%d)",
+                        request_pair,
+                        current_since,
+                        existing_count,
+                    )
+                # Advance by one interval to avoid repeated duplicates
+                current_since = prev_since + max(1, interval_minutes * 60)
+                if current_since >= end_ts:
+                    break
+                continue
 
             try:
                 # Store under normalized pair key for consistency
