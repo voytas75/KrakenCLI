@@ -35,6 +35,10 @@ from analysis.pattern_scanner import (
     PatternSnapshot,
     PatternStats,
 )
+from analysis.pattern_nl_mapper import (
+    PatternDescriptionMapper,
+    PatternMappingRequest,
+)
 from utils.helpers import format_percentage, format_timestamp
 
 
@@ -202,8 +206,15 @@ def register(
             ],
             case_sensitive=False,
         ),
-        required=True,
-        help="Pattern to scan for.",
+        required=False,
+        help="Pattern to scan for (mutually exclusive with --describe).",
+    )
+    @click.option(
+        "--describe",
+        "-d",
+        type=str,
+        required=False,
+        help="Natural-language pattern description (mutually exclusive with --pattern).",
     )
     @click.option("--force-refresh", is_flag=True, help="Bypass cached results.")
     @click.option(
@@ -239,7 +250,8 @@ def register(
         pair: str,
         timeframe: str,
         lookback: int,
-        pattern: str,
+        pattern: Optional[str],
+        describe: Optional[str],
         force_refresh: bool,
         export_snapshots: bool,
         output: str,
@@ -263,7 +275,40 @@ def register(
             console.print(f"[red]❌ {exc}[/red]")
             raise click.Abort()
 
-        pattern_name = pattern.lower().strip()
+        # Determine pattern via explicit choice or NL description
+        direction_filter: Optional[str] = None
+        mapping_source: str = "explicit"
+        mapping_confidence: Optional[float] = None
+        mapping_notes: Optional[str] = None
+
+        if (pattern and describe) or (not pattern and not describe):
+            console.print(
+                "[red]❌ Provide either --pattern or --describe (but not both).[/red]"
+            )
+            raise click.Abort()
+
+        if describe:
+            mapper = PatternDescriptionMapper()
+            req = PatternMappingRequest(
+                description=describe,
+                pair=normalized_pair,
+                timeframe_minutes=timeframe_minutes,
+                lookback_days=lookback,
+            )
+            try:
+                mapping = mapper.map(req)
+            except ValueError as exc:
+                console.print(f"[red]❌ Failed to map description: {exc}[/red]")
+                raise click.Abort()
+
+            pattern_name = mapping.pattern_name
+            direction_filter = mapping.direction
+            mapping_source = mapping.source
+            mapping_confidence = mapping.confidence
+            mapping_notes = mapping.notes
+        else:
+            pattern_name = (pattern or "").lower().strip()
+
         console.print(
             f"[bold blue]🔍 Scanning {normalized_pair} ({timeframe}) for "
             f"[cyan]{pattern_name}[/cyan]…[/bold blue]"
@@ -302,6 +347,18 @@ def register(
             console.print(f"[red]❌ Pattern scan failed: {exc}[/red]")
             raise click.Abort()
 
+        # Apply optional direction filter from NL mapping
+        try:
+            if direction_filter:
+                matches = [m for m in matches if m.direction == direction_filter]
+                # Recompute stats for filtered matches to keep summary consistent
+                stats = scanner._compute_stats(
+                    normalized_pair, timeframe_minutes, pattern_name, matches
+                )
+        except Exception:
+            # Defensive: never let filtering break CLI
+            pass
+
         if not matches:
             console.print(
                 "[yellow]ℹ️  No matches found for the selected configuration.[/yellow]"
@@ -316,6 +373,12 @@ def register(
                 "lookback_candles_days": lookback,
                 "stats": _stats_to_dict(stats),
                 "matches": [_match_to_dict(m) for m in matches],
+                "mapping": {
+                    "source": mapping_source,
+                    "direction": direction_filter,
+                    "confidence": mapping_confidence,
+                    "notes": mapping_notes,
+                },
             }
             if export_snapshots:
                 try:
@@ -366,6 +429,13 @@ def register(
         summary_table.add_row("Pair", stats.pair)
         summary_table.add_row("Timeframe", timeframe)
         summary_table.add_row("Lookback (days)", str(lookback))
+        if direction_filter:
+            summary_table.add_row("Direction Filter", direction_filter)
+        summary_table.add_row("Mapping Source", mapping_source)
+        if mapping_confidence is not None:
+            summary_table.add_row("Mapping Confidence", f"{mapping_confidence:.2f}")
+        if mapping_notes:
+            summary_table.add_row("Mapping Notes", mapping_notes)
         summary_table.add_row("Match Count", str(stats.total_matches))
         summary_table.add_row(
             "Avg Move %",
