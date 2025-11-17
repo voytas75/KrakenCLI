@@ -680,6 +680,11 @@ def register(
         show_default=True,
         help="Output format for gap inspection.",
     )
+    @click.option(
+        "--fill-gaps",
+        is_flag=True,
+        help="Backfill only missing candles within the requested window.",
+    )
     @click.pass_context
     def ohlc_sync(  # type: ignore[unused-ignore]
         ctx: click.Context,
@@ -690,6 +695,7 @@ def register(
         until: Optional[str],
         inspect_gaps: bool,
         gaps_output: str,
+        fill_gaps: bool,
     ) -> None:
         """Synchronize OHLC candles from Kraken into SQLite.
 
@@ -833,6 +839,41 @@ def register(
             conn.close()
             return
 
+        # Optional gaps-only backfill path
+        if fill_gaps:
+            try:
+                inserted_total, request_count = _fill_gaps_in_window(
+                    conn=conn,
+                    api_client=api_client,
+                    request_pair=request_pair,
+                    interval_minutes=interval_minutes,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                    console=console,
+                )
+            except Exception as exc:
+                console.print(f"[red]❌ Gap fill failed: {exc}[/red]")
+                conn.close()
+                return
+
+            conn.close()
+
+            table = Table(title="OHLC Gap Fill Summary")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Pair", pair)
+            table.add_row("Timeframe", f"{timeframe} ({interval_minutes}m)")
+            table.add_row("Requests", str(request_count))
+            table.add_row("Inserted Bars", str(inserted_total))
+            table.add_row("DB Path", str(DB_PATH_DEFAULT))
+            console.print(table)
+
+            if inserted_total > 0:
+                console.print("[green]✅ Gap fill completed[/green]")
+            else:
+                console.print("[yellow]ℹ️ No rows inserted[/yellow]")
+            return
+
         inserted_total = 0
         request_count = 0
         last_public_call_ts = 0.0  # enforce ≤1 public req/sec for OHLC sync
@@ -911,6 +952,13 @@ def register(
 
             # Per-request throttle enforced above (1 req/sec); no extra cycle delay.
 
+            # Restrict fetched rows to the requested window to avoid false
+            # "already in DB" detections caused by out-of-window candles.
+            step = max(1, interval_minutes * 60)
+            selected_bars = [
+                b for b in selected_bars
+                if int(b[0]) >= current_since and int(b[0]) <= end_ts
+            ]
             if not selected_bars:
                 # Debug: explain absence of bars for current window/candidates
                 if logger.isEnabledFor(logging.DEBUG):
