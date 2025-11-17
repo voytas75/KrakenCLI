@@ -553,10 +553,25 @@ def _fill_gaps_in_window(
         )
         start_ts = retrievable_start
 
-    for gap in gaps:
+    for idx, gap in enumerate(gaps, start=1):
         gap_start = int(gap.get("start_ts", start_ts))
         gap_end_exclusive = int(gap.get("end_ts_exclusive", end_ts + step))
+        gap_missing = int(gap.get("missing_count", 0))
         current_since = gap_start
+
+        # Local timestamp formatter for readable progress output
+        def _fmt_ts(ts: int) -> str:
+            try:
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return str(ts)
+
+        console.print(
+            f"[dim]Gap {idx}/{len(gaps)}: {_fmt_ts(gap_start)} → "
+            f"{_fmt_ts(gap_end_exclusive)} (missing {gap_missing})[/dim]"
+        )
+        gap_inserted = 0
 
         # Fetch until Kraken's last marker reaches the end of this gap
         while True:
@@ -564,6 +579,8 @@ def _fill_gaps_in_window(
             now_monotonic = time.monotonic()
             wait = max(0.0, 1.0 - (now_monotonic - last_public_call_ts))
             if wait > 0.0:
+                if logger.isEnabledFor(logging.DEBUG):
+                    console.print(f"[dim]Throttling {wait:.2f}s (rate limit)[/dim]")
                 time.sleep(wait)
 
             candidates = candidate_pair_keys(request_pair)
@@ -573,6 +590,11 @@ def _fill_gaps_in_window(
             # Try candidate pair keys to resolve OHLC payload
             for attempt_pair in candidates:
                 try:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        console.print(
+                            f"[dim]Fetching {attempt_pair} since={current_since} "
+                            f"interval={interval_minutes}m[/dim]"
+                        )
                     payload = api_client.get_ohlc_data(
                         pair=attempt_pair,
                         interval=interval_minutes,
@@ -585,7 +607,10 @@ def _fill_gaps_in_window(
                     last_public_call_ts = time.monotonic()
                     msg = str(exc)
                     if ("Too many requests" in msg) or ("429" in msg):
-                        # Simple backoff for rate limit responses
+                        console.print(
+                            f"[yellow]⚠️ Rate limited on {attempt_pair}; "
+                            "backing off 2.0s[/yellow]"
+                        )
                         time.sleep(2.0)
                         continue
                     payload = None
@@ -601,8 +626,8 @@ def _fill_gaps_in_window(
             if not payload:
                 # Unable to fetch for this gap with any candidate; move to next gap
                 console.print(
-                    f"[yellow]⚠️ Skipping gap starting at {gap_start} "
-                    f"(no payload returned)[/yellow]"
+                    f"[yellow]⚠️ Skipping gap starting at {_fmt_ts(gap_start)} "
+                    "(no payload returned)[/yellow]"
                 )
                 break
 
@@ -614,15 +639,25 @@ def _fill_gaps_in_window(
 
             if filtered_rows:
                 try:
-                    inserted = _insert_bars(conn, request_pair, interval_minutes, filtered_rows)
+                    inserted = _insert_bars(
+                        conn, request_pair, interval_minutes, filtered_rows
+                    )
                 except sqlite3.Error as exc:
                     console.print(f"[red]❌ DB insert failed during gap fill: {exc}[/red]")
                     break
 
                 inserted_total += inserted
+                gap_inserted += inserted
+                if logger.isEnabledFor(logging.DEBUG):
+                    console.print(
+                        f"[dim]Inserted {inserted} rows for "
+                        f"{request_pair} (since={current_since})[/dim]"
+                    )
 
             # Advance using Kraken's 'last' token
-            last_raw = (payload.get("result", {}) if isinstance(payload, dict) else {}).get("last")
+            last_raw = (
+                payload.get("result", {}) if isinstance(payload, dict) else {}
+            ).get("last")
             try:
                 last_ts = int(last_raw) if last_raw is not None else 0
             except (TypeError, ValueError):
@@ -630,13 +665,22 @@ def _fill_gaps_in_window(
 
             if last_ts == 0:
                 # No more data available according to Kraken; stop this gap
+                console.print("[yellow]ℹ️ No more data available for this gap[/yellow]")
                 break
 
             if last_ts >= (gap_end_exclusive - step):
                 # We have covered this gap sufficiently
+                console.print(
+                    f"[dim]Gap {idx}/{len(gaps)} covered up to {_fmt_ts(last_ts)}[/dim]"
+                )
                 break
 
             current_since = last_ts
+
+        console.print(
+            f"[green]✅ Completed gap {idx}/{len(gaps)}; "
+            f"inserted {gap_inserted} bars[/green]"
+        )
 
     return inserted_total, request_count
 
