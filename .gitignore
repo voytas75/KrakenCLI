@@ -69,3 +69,5 @@ embeddings/
 node_modules/
 package-lock.json
 package.json
+data/*.csv
+data/*.db
