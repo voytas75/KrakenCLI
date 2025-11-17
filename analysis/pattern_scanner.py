@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import sqlite3
 
 import pandas as pd
 import yaml
@@ -85,6 +86,8 @@ class PatternCacheKey:
     timeframe: int
     pattern_name: str
     lookback_days: int
+    data_source: str
+    db_label: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -158,6 +161,8 @@ class PatternScanner:
         pattern_name: str,
         *,
         force_refresh: bool = False,
+        data_source: str = "api",
+        db_path: Path | None = None,
     ) -> tuple[PatternStats, List[PatternMatch], List[PatternSnapshot]]:
         """Scan OHLC data for the requested pattern.
 
@@ -188,6 +193,12 @@ class PatternScanner:
             timeframe=int(timeframe),
             pattern_name=pattern_name,
             lookback_days=int(lookback_days),
+            data_source=str(data_source).lower(),
+            db_label=(
+                (db_path.name if db_path is not None else "default")
+                if str(data_source).lower() == "local"
+                else None
+            ),
         )
 
         if not force_refresh:
@@ -212,11 +223,19 @@ class PatternScanner:
         if detector is None:
             raise ValueError(f"Unknown pattern name: {pattern_name!r}")
 
-        ohlc_frame = self._fetch_ohlc_frame(
-            pair=pair,
-            timeframe=timeframe,
-            lookback_days=lookback_days,
-        )
+        if str(data_source).lower() == "local":
+            ohlc_frame = self._fetch_ohlc_frame_local(
+                pair=pair,
+                timeframe=timeframe,
+                lookback_days=lookback_days,
+                db_path=db_path,
+            )
+        else:
+            ohlc_frame = self._fetch_ohlc_frame(
+                pair=pair,
+                timeframe=timeframe,
+                lookback_days=lookback_days,
+            )
         if ohlc_frame.empty:
             raise ValueError("No OHLC data available for pattern scan.")
 
@@ -253,9 +272,12 @@ class PatternScanner:
     def _cache_file_path(self, key: PatternCacheKey) -> Path:
         """Return path to the cache file for the provided key."""
         safe_pair = key.pair.replace("/", "_")
+        source_tag = f"_src{key.data_source}" if getattr(key, "data_source", None) else ""
+        db_tag = f"_{key.db_label}" if getattr(key, "db_label", None) else ""
         filename = (
             f"{safe_pair}_tf{key.timeframe}_"
-            f"{key.pattern_name}_lb{key.lookback_days}.json"
+            f"{key.pattern_name}_lb{key.lookback_days}"
+            f"{source_tag}{db_tag}.json"
         )
         return self._cache_dir / filename
 
@@ -340,7 +362,7 @@ class PatternScanner:
         """Fetch and normalise OHLC data for the requested window."""
         now = int(time.time())
         since = now - int(lookback_days) * 86400
-
+    
         response = self._client.get_ohlc_data(
             pair=pair,
             interval=int(timeframe),
@@ -355,7 +377,7 @@ class PatternScanner:
                 list(result_payload.keys()),
             )
             return pd.DataFrame()
-
+    
         rows: List[Dict[str, Any]] = []
         for raw in ohlc_iterable:
             if not raw or len(raw) < 8:
@@ -375,14 +397,88 @@ class PatternScanner:
                 )
             except (TypeError, ValueError):
                 continue
-
+    
         if not rows:
             return pd.DataFrame()
-
+    
         frame = pd.DataFrame(rows)
         frame.sort_values("time", inplace=True)
         frame.reset_index(drop=True, inplace=True)
         return frame
+    
+    def _fetch_ohlc_frame_local(
+        self,
+        *,
+        pair: str,
+        timeframe: int,
+        lookback_days: int,
+        db_path: Path | None = None,
+    ) -> pd.DataFrame:
+        """Fetch OHLC data from local SQLite store (data/ohlc.db by default).
+    
+        Args:
+            pair: Trading pair (e.g., 'ETHUSD').
+            timeframe: Candle interval in minutes.
+            lookback_days: Number of days to look back from now.
+            db_path: Optional explicit database path.
+    
+        Returns:
+            DataFrame with columns: time, open, high, low, close, vwap, volume, count.
+            Empty DataFrame if unavailable.
+        """
+        try:
+            database = db_path or (Path("data") / "ohlc.db")
+            if not database.exists():
+                logger.warning("Local OHLC database not found at %s", database)
+                return pd.DataFrame()
+    
+            since = int(time.time()) - int(lookback_days) * 86400
+            rows: list[dict[str, Any]] = []
+    
+            conn = sqlite3.connect(database.as_posix())
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT time, open, high, low, close, vwap, volume, count
+                    FROM ohlc_bars
+                    WHERE pair=? AND timeframe_minutes=? AND time >= ?
+                    ORDER BY time
+                    """,
+                    (pair.upper(), int(timeframe), int(since)),
+                )
+                for rec in cursor:
+                    try:
+                        rows.append(
+                            {
+                                "time": float(rec[0]),
+                                "open": float(rec[1]),
+                                "high": float(rec[2]),
+                                "low": float(rec[3]),
+                                "close": float(rec[4]),
+                                "vwap": float(rec[5]) if rec[5] is not None else float("nan"),
+                                "volume": float(rec[6]) if rec[6] is not None else float("nan"),
+                                "count": int(rec[7]) if rec[7] is not None else 0,
+                            }
+                        )
+                    except (TypeError, ValueError):
+                        continue
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    
+            if not rows:
+                return pd.DataFrame()
+    
+            frame = pd.DataFrame(rows)
+            frame.sort_values("time", inplace=True)
+            frame.reset_index(drop=True, inplace=True)
+            return frame
+        except Exception as exc:  # defensive local IO/SQL guard
+            logger.error("Failed to read local OHLC data: %s", exc)
+            return pd.DataFrame()
 
     def _compute_stats(
         self,

@@ -219,6 +219,20 @@ def register(
         show_default=True,
         help="Render output as a Rich table or JSON payload.",
     )
+    @click.option(
+        "--source",
+        type=click.Choice(["api", "local"], case_sensitive=False),
+        default="api",
+        show_default=True,
+        help="OHLC data source: Kraken API or local SQLite store.",
+    )
+    @click.option(
+        "--db-path",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=Path("data/ohlc.db"),
+        show_default=True,
+        help="Path to local SQLite OHLC database (when --source=local).",
+    )
     @click.pass_context
     def pattern_scan(  # type: ignore[unused-ignore]
         ctx: click.Context,
@@ -229,6 +243,8 @@ def register(
         force_refresh: bool,
         export_snapshots: bool,
         output: str,
+        source: str,
+        db_path: Path,
     ) -> None:
         """Scan OHLC data for a specific pattern and render results.
 
@@ -252,6 +268,21 @@ def register(
             f"[bold blue]🔍 Scanning {normalized_pair} ({timeframe}) for "
             f"[cyan]{pattern_name}[/cyan]…[/bold blue]"
         )
+        
+        # Optional local source validation
+        if source.lower() == "local":
+            try:
+                if not db_path.exists():
+                    console.print(
+                        f"[red]❌ Local OHLC DB not found at {db_path}[/red]"
+                    )
+                    console.print(
+                        "[yellow]Run 'kraken_cli.py data ohlc-sync' to backfill, "
+                        "or adjust --db-path[/yellow]"
+                    )
+                    raise click.Abort()
+            except Exception:
+                raise click.Abort()
 
         try:
             stats, matches, snapshots = call_with_retries(
@@ -261,6 +292,8 @@ def register(
                     lookback,
                     pattern_name,
                     force_refresh=force_refresh,
+                    data_source=source.lower(),
+                    db_path=db_path if source.lower() == "local" else None,
                 ),
                 "Pattern scan",
                 display_label="⏳ Scanning pattern",
