@@ -523,6 +523,36 @@ def _fill_gaps_in_window(
     step = max(1, interval_minutes * 60)
     last_public_call_ts = 0.0
 
+    # Enforce Kraken OHLC retrieval horizon (max 720 most recent candles).
+    now_sec = int(time.time())
+    max_entries = 720
+    retrievable_start = max(0, now_sec - (max_entries * step))
+
+    if end_ts < retrievable_start:
+        console.print(
+            "[yellow]⚠️ Requested window is entirely older than Kraken OHLC "
+            "retrieval horizon for this timeframe.[/yellow]"
+        )
+        console.print(
+            f"[dim]Timeframe={interval_minutes}m → retrievable horizon start="
+            f"{retrievable_start}[/dim]"
+        )
+        console.print(
+            "[blue]ℹ️ Tips:[/blue] Use a larger timeframe (e.g., 1d has ~720 days), "
+            "or source historical data externally."
+        )
+        return 0, 0
+
+    if start_ts < retrievable_start:
+        console.print(
+            "[yellow]⚠️ Clamping start of window to Kraken OHLC horizon "
+            "(older candles cannot be fetched).[/yellow]"
+        )
+        console.print(
+            f"[dim]Original start={start_ts} → Effective start={retrievable_start}[/dim]"
+        )
+        start_ts = retrievable_start
+
     for gap in gaps:
         gap_start = int(gap.get("start_ts", start_ts))
         gap_end_exclusive = int(gap.get("end_ts_exclusive", end_ts + step))
@@ -735,6 +765,41 @@ def register(
             end_ts = now_sec
 
         assert start_ts is not None and end_ts is not None
+
+        # Kraken OHLC limitation: returns up to 720 most recent entries only.
+        # Older data cannot be retrieved regardless of 'since'. Enforce this
+        # constraint by clamping the start of the requested window to the
+        # retrievable horizon and warn the user when a full historical backfill
+        # is not possible for the selected timeframe.
+        step_seconds = interval_minutes * 60
+        max_entries = 720
+        retrievable_start = max(0, now_sec - (max_entries * step_seconds))
+
+        if end_ts < retrievable_start:
+            console.print(
+                "[yellow]⚠️ Requested window is entirely older than Kraken OHLC "
+                "retrieval horizon for this timeframe.[/yellow]"
+            )
+            console.print(
+                f"[dim]Timeframe={interval_minutes}m → retrievable horizon start="
+                f"{retrievable_start}[/dim]"
+            )
+            console.print(
+                "[blue]ℹ️ Tips:[/blue] Use a larger timeframe (e.g., 1d has ~720 days), "
+                "or source historical data externally."
+            )
+            conn.close()
+            return
+
+        if start_ts < retrievable_start:
+            console.print(
+                "[yellow]⚠️ Clamping start of window to Kraken OHLC horizon "
+                "(older candles cannot be fetched).[/yellow]"
+            )
+            console.print(
+                f"[dim]Original start={start_ts} → Effective start={retrievable_start}[/dim]"
+            )
+            start_ts = retrievable_start
 
         # Prepare database
         try:
