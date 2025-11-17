@@ -476,6 +476,140 @@ def find_ohlc_gaps(
         "coverage_ratio": coverage_ratio,
     }
     return gaps, summary
+def _fill_gaps_in_window(
+    conn: sqlite3.Connection,
+    api_client: KrakenAPIClient,
+    request_pair: str,
+    interval_minutes: int,
+    start_ts: int,
+    end_ts: int,
+    console: Console,
+) -> tuple[int, int]:
+    """Backfill only missing OHLC candles for the given window.
+    
+    This function:
+    - Detects gaps using find_ohlc_gaps
+    - Iterates gaps in order and fetches OHLC with Kraken's `since` token
+    - Inserts rows into SQLite, relying on PK conflict to skip duplicates
+    - Honors ≤1 public request/sec per HTTP call
+    
+    Args:
+        conn: Open SQLite connection to the OHLC database.
+        api_client: Kraken API client for public OHLC requests.
+        request_pair: Normalized pair (e.g., 'ETHUSD').
+        interval_minutes: Candle interval in minutes.
+        start_ts: Inclusive window start (epoch seconds).
+        end_ts: Inclusive window end (epoch seconds).
+        console: Rich console for status messages.
+    
+    Returns:
+        Tuple of (inserted_total, request_count).
+    """
+    inserted_total = 0
+    request_count = 0
+
+    gaps, summary = find_ohlc_gaps(
+        conn=conn,
+        pair=request_pair,
+        timeframe_minutes=interval_minutes,
+        start_ts=start_ts,
+        end_ts=end_ts,
+    )
+
+    if not gaps:
+        console.print("[green]✅ No gaps to fill in the selected window[/green]")
+        return 0, 0
+
+    step = max(1, interval_minutes * 60)
+    last_public_call_ts = 0.0
+
+    for gap in gaps:
+        gap_start = int(gap.get("start_ts", start_ts))
+        gap_end_exclusive = int(gap.get("end_ts_exclusive", end_ts + step))
+        current_since = gap_start
+
+        # Fetch until Kraken's last marker reaches the end of this gap
+        while True:
+            # Per-call throttle: ≤ 1 req/sec
+            now_monotonic = time.monotonic()
+            wait = max(0.0, 1.0 - (now_monotonic - last_public_call_ts))
+            if wait > 0.0:
+                time.sleep(wait)
+
+            candidates = candidate_pair_keys(request_pair)
+            payload: Dict[str, Any] | None = None
+            rows: List[Any] = []
+
+            # Try candidate pair keys to resolve OHLC payload
+            for attempt_pair in candidates:
+                try:
+                    payload = api_client.get_ohlc_data(
+                        pair=attempt_pair,
+                        interval=interval_minutes,
+                        since=current_since,
+                    )
+                    request_count += 1
+                    last_public_call_ts = time.monotonic()
+                except Exception as exc:
+                    request_count += 1
+                    last_public_call_ts = time.monotonic()
+                    msg = str(exc)
+                    if ("Too many requests" in msg) or ("429" in msg):
+                        # Simple backoff for rate limit responses
+                        time.sleep(2.0)
+                        continue
+                    payload = None
+
+                if not payload:
+                    continue
+
+                result = payload.get("result", {}) if isinstance(payload, dict) else {}
+                bars_iter, _resolved_key = resolve_ohlc_payload(attempt_pair, result)
+                rows = list(bars_iter or [])
+                break
+
+            if not payload:
+                # Unable to fetch for this gap with any candidate; move to next gap
+                console.print(
+                    f"[yellow]⚠️ Skipping gap starting at {gap_start} "
+                    f"(no payload returned)[/yellow]"
+                )
+                break
+
+            # Filter rows within the gap window to avoid overshoot inserts
+            filtered_rows = [
+                b for b in rows
+                if int(b[0]) >= current_since and int(b[0]) < gap_end_exclusive
+            ]
+
+            if filtered_rows:
+                try:
+                    inserted = _insert_bars(conn, request_pair, interval_minutes, filtered_rows)
+                except sqlite3.Error as exc:
+                    console.print(f"[red]❌ DB insert failed during gap fill: {exc}[/red]")
+                    break
+
+                inserted_total += inserted
+
+            # Advance using Kraken's 'last' token
+            last_raw = (payload.get("result", {}) if isinstance(payload, dict) else {}).get("last")
+            try:
+                last_ts = int(last_raw) if last_raw is not None else 0
+            except (TypeError, ValueError):
+                last_ts = 0
+
+            if last_ts == 0:
+                # No more data available according to Kraken; stop this gap
+                break
+
+            if last_ts >= (gap_end_exclusive - step):
+                # We have covered this gap sufficiently
+                break
+
+            current_since = last_ts
+
+    return inserted_total, request_count
+
 def register(
     cli_group: click.Group,
     *,
