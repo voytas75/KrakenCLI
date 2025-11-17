@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -322,6 +323,160 @@ def _has_bars_since(
         return False
 
 
+# Gap detection helpers for OHLC SQLite storage
+
+def _align_window(start_ts: int, end_ts: int, step: int) -> tuple[int, int]:
+    """Align a window to the candle grid in epoch seconds.
+    
+    Args:
+        start_ts: Window start timestamp (epoch seconds).
+        end_ts: Window end timestamp (epoch seconds).
+        step: Candle step in seconds (timeframe_minutes * 60).
+    
+    Returns:
+        Tuple of aligned start and end timestamps (Astart, Aend) such that:
+        - Astart is the smallest multiple of step >= start_ts
+        - Aend is the largest multiple of step <= end_ts
+        - If window is empty after alignment, returns (0, -1).
+    """
+    if end_ts < start_ts:
+        return 0, -1
+    aligned_start = ((start_ts + step - 1) // step) * step
+    aligned_end = (end_ts // step) * step
+    return aligned_start, aligned_end
+
+
+def _iter_existing_candle_times(
+    conn: sqlite3.Connection,
+    pair: str,
+    timeframe_minutes: int,
+    start_ts: int,
+    end_ts: int,
+) -> Iterable[int]:
+    """Yield ordered candle times present in DB within [start_ts, end_ts].
+    
+    Args:
+        conn: SQLite connection.
+        pair: Trading pair (e.g., 'ETHUSD').
+        timeframe_minutes: Interval length in minutes.
+        start_ts: Window start (inclusive, epoch seconds).
+        end_ts: Window end (inclusive, epoch seconds).
+    
+    Yields:
+        Candle start timestamps as integers in ascending order.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT time
+        FROM ohlc_bars
+        WHERE pair=? AND timeframe_minutes=? AND time BETWEEN ? AND ?
+        ORDER BY time
+        """,
+        (pair, timeframe_minutes, start_ts, end_ts),
+    )
+    for row in cursor:
+        try:
+            yield int(row[0])
+        except (TypeError, ValueError):
+            # Skip malformed rows; schema should prevent these.
+            continue
+
+
+def find_ohlc_gaps(
+    conn: sqlite3.Connection,
+    pair: str,
+    timeframe_minutes: int,
+    start_ts: int,
+    end_ts: int,
+) -> tuple[list[dict[str, int]], dict[str, float]]:
+    """Compute missing candle ranges for (pair, timeframe, window).
+    
+    This scans the local SQLite OHLC store and returns contiguous missing
+    ranges as gap records, along with coverage metrics for the window.
+    
+    Args:
+        conn: SQLite connection.
+        pair: Trading pair identifier (e.g., 'ETHUSD').
+        timeframe_minutes: Interval length in minutes.
+        start_ts: Window start (epoch seconds, inclusive).
+        end_ts: Window end (epoch seconds, inclusive).
+    
+    Returns:
+        Tuple of:
+        - gaps: list of dicts with keys:
+            - start_ts: inclusive missing timestamp
+            - end_ts_exclusive: exclusive bound (next expected or window end + step)
+            - missing_count: number of missing candles in the gap
+        - summary: dict with coverage metrics:
+            - expected: number of expected candles in the aligned window
+            - present: number of present candles found
+            - missing: total missing candle count across gaps
+            - coverage_ratio: present / expected (0.0..1.0)
+    
+    Notes:
+        - Window is aligned to the candle grid before scanning.
+        - All times are UTC epoch seconds of candle starts.
+    """
+    step = timeframe_minutes * 60
+    aligned_start, aligned_end = _align_window(start_ts, end_ts, step)
+    if aligned_start > aligned_end:
+        return [], {
+            "expected": 0.0,
+            "present": 0.0,
+            "missing": 0.0,
+            "coverage_ratio": 1.0,
+        }
+
+    expected_count = ((aligned_end - aligned_start) // step) + 1
+
+    gaps: list[dict[str, int]] = []
+    present_count = 0
+    expected = aligned_start
+
+    for present in _iter_existing_candle_times(
+        conn, pair, timeframe_minutes, aligned_start, aligned_end
+    ):
+        # Ignore any unexpected or duplicate entries behind the cursor
+        if present < expected:
+            continue
+
+        # Missing region up to 'present'
+        if expected < present:
+            gaps.append(
+                {
+                    "start_ts": expected,
+                    "end_ts_exclusive": present,
+                    "missing_count": (present - expected) // step,
+                }
+            )
+
+        # Accept the present candle and advance cursor
+        present_count += 1
+        expected = present + step
+
+    # Trailing gap to end of window (if any)
+    if expected <= aligned_end:
+        gaps.append(
+            {
+                "start_ts": expected,
+                "end_ts_exclusive": aligned_end + step,
+                "missing_count": ((aligned_end + step) - expected) // step,
+            }
+        )
+
+    missing_total = sum(g["missing_count"] for g in gaps)
+    coverage_ratio = (
+        present_count / expected_count if expected_count else 1.0
+    )
+
+    summary = {
+        "expected": float(expected_count),
+        "present": float(present_count),
+        "missing": float(missing_total),
+        "coverage_ratio": coverage_ratio,
+    }
+    return gaps, summary
 def register(
     cli_group: click.Group,
     *,
@@ -380,6 +535,18 @@ def register(
         default=None,
         help="End time (epoch seconds or ISO 'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S').",
     )
+    @click.option(
+        "--inspect-gaps",
+        is_flag=True,
+        help="Inspect DB for missing candles in the requested window (no sync).",
+    )
+    @click.option(
+        "--gaps-output",
+        type=click.Choice(["table", "json"], case_sensitive=False),
+        default="table",
+        show_default=True,
+        help="Output format for gap inspection.",
+    )
     @click.pass_context
     def ohlc_sync(  # type: ignore[unused-ignore]
         ctx: click.Context,
@@ -388,6 +555,8 @@ def register(
         days: int,
         since: Optional[str],
         until: Optional[str],
+        inspect_gaps: bool,
+        gaps_output: str,
     ) -> None:
         """Synchronize OHLC candles from Kraken into SQLite.
 
@@ -459,6 +628,77 @@ def register(
                 border_style="blue",
             )
         )
+
+        # Optional gap inspection: compute and display gaps, then exit early
+        if inspect_gaps:
+            try:
+                gaps, summary = find_ohlc_gaps(
+                    conn=conn,
+                    pair=request_pair,
+                    timeframe_minutes=interval_minutes,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
+            except Exception as exc:
+                conn.close()
+                console.print(f"[red]❌ Gap inspection failed: {exc}[/red]")
+                return
+
+            step_seconds = interval_minutes * 60
+            if gaps_output.lower() == "json":
+                payload: Dict[str, Any] = {
+                    "pair": request_pair,
+                    "timeframe": timeframe,
+                    "window": {"start": start_ts, "end": end_ts},
+                    "step_seconds": step_seconds,
+                    "coverage": {
+                        "expected": int(summary.get("expected", 0.0)),
+                        "present": int(summary.get("present", 0.0)),
+                        "missing": int(summary.get("missing", 0.0)),
+                        "ratio": float(summary.get("coverage_ratio", 0.0)),
+                    },
+                    "gaps": gaps,
+                }
+                console.print(json.dumps(payload, indent=2))
+                conn.close()
+                return
+
+            coverage_table = Table(title="OHLC Coverage Summary")
+            coverage_table.add_column("Metric", style="cyan")
+            coverage_table.add_column("Value", style="green")
+            coverage_table.add_row("Expected", str(int(summary.get("expected", 0.0))))
+            coverage_table.add_row("Present", str(int(summary.get("present", 0.0))))
+            coverage_table.add_row("Missing", str(int(summary.get("missing", 0.0))))
+            coverage_table.add_row(
+                "Coverage Ratio",
+                f"{float(summary.get('coverage_ratio', 0.0)):.4f}",
+            )
+            console.print(coverage_table)
+
+            gaps_table = Table(title="Detected Gaps", show_lines=False)
+            gaps_table.add_column("Start (UTC)", style="cyan")
+            gaps_table.add_column("End (UTC, excl.)", style="magenta")
+            gaps_table.add_column("Missing Candles", justify="right", style="yellow")
+
+            def _fmt_ts(ts: int) -> str:
+                try:
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    return dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    return str(ts)
+
+            if not gaps:
+                console.print("[green]✅ No gaps detected in the selected window[/green]")
+            else:
+                for gap in gaps:
+                    start_val = int(gap.get("start_ts", 0))
+                    end_excl = int(gap.get("end_ts_exclusive", 0))
+                    count = int(gap.get("missing_count", 0))
+                    gaps_table.add_row(_fmt_ts(start_val), _fmt_ts(end_excl), str(count))
+                console.print(gaps_table)
+
+            conn.close()
+            return
 
         inserted_total = 0
         request_count = 0
