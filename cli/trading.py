@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+import sqlite3
 
 import click
 from rich.console import Console
@@ -23,6 +25,7 @@ from portfolio.portfolio_manager import PortfolioManager
 from trading.trader import Trader
 from utils.helpers import format_currency
 from utils.market_data import resolve_ohlc_payload
+from analysis.pattern_llm_client import PatternLLMClient, PatternLLMError
 
 
 def register(
@@ -602,6 +605,25 @@ def register(
         show_default=True,
         help="Render output as a Rich table or JSON payload.",
     )
+    @click.option(
+        "--source",
+        type=click.Choice(["api", "local"], case_sensitive=False),
+        default="api",
+        show_default=True,
+        help="OHLC data source: Kraken API or local SQLite store.",
+    )
+    @click.option(
+        "--db-path",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=Path("data/ohlc.db"),
+        show_default=True,
+        help="Path to local SQLite OHLC database (when --source=local).",
+    )
+    @click.option(
+        "--explain",
+        is_flag=True,
+        help="Use LLM to explain the OHLC sample (requires PATTERN_LLM_* env).",
+    )
     @click.pass_context
     def ohlc(  # type: ignore[unused-ignore]
         ctx: click.Context,
@@ -610,6 +632,9 @@ def register(
         limit: int,
         since: Optional[int],
         output: str,
+        source: str,
+        db_path,
+        explain: bool,
     ) -> None:
         """Fetch OHLC candles for a trading pair.
 
@@ -623,39 +648,112 @@ def register(
         """
 
         api_client = _ensure_api_client(ctx)
-        if api_client is None:
+        if api_client is None and source.lower() == "api":
             return
 
         normalized_pair = pair.upper()
         console.print(
-            f"[bold blue]📈 Fetching OHLC data for {normalized_pair} ({interval}m)...[/bold blue]"
+            f"[bold blue]📈 Fetching OHLC data for {normalized_pair} ({interval}m) "
+            f"from {source.lower()}...[/bold blue]"
         )
 
-        def _fetch() -> Dict[str, Any]:
-            kwargs: Dict[str, Any] = {"since": since} if since is not None else {}
-            return api_client.get_ohlc_data(normalized_pair, interval=interval, **kwargs)
+        rows: List[List[Any]] = []
+        resolved_key: str = normalized_pair
+        result: Dict[str, Any] = {}
 
-        try:
-            response = call_with_retries(
-                _fetch,
-                "OHLC data fetch",
-                display_label="⏳ Loading OHLC candles",
-            )
-        except Exception as exc:  # pragma: no cover - defensive user message
-            console.print(f"[red]❌ Failed to fetch OHLC data: {exc}[/red]")
-            return
+        if source.lower() == "local":
+            try:
+                # Validate DB path
+                database_path = db_path if isinstance(db_path, Path) else Path("data/ohlc.db")
+                if not database_path.exists():
+                    console.print(
+                        f"[red]❌ Local OHLC DB not found at {database_path}[/red]"
+                    )
+                    console.print(
+                        "[yellow]Run 'kraken_cli.py data ohlc-sync' to backfill, "
+                        "or adjust --db-path[/yellow]"
+                    )
+                    raise click.Abort()
+                conn = sqlite3.connect(database_path.as_posix())
+                try:
+                    cursor = conn.cursor()
+                    if since is not None:
+                        cursor.execute(
+                            """
+                            SELECT time, open, high, low, close, vwap, volume, count
+                            FROM ohlc_bars
+                            WHERE pair=? AND timeframe_minutes=? AND time >= ?
+                            ORDER BY time
+                            """,
+                            (normalized_pair, int(interval), int(since)),
+                        )
+                    else:
+                        cursor.execute(
+                            """
+                            SELECT time, open, high, low, close, vwap, volume, count
+                            FROM ohlc_bars
+                            WHERE pair=? AND timeframe_minutes=?
+                            ORDER BY time DESC
+                            LIMIT ?
+                            """,
+                            (normalized_pair, int(interval), int(limit)),
+                        )
+                    fetched = cursor.fetchall()
+                    # Convert to API-like raw rows order ascending by time
+                    if fetched and since is None:
+                        fetched = list(reversed(fetched))
+                    for rec in fetched:
+                        try:
+                            rows.append(
+                                [
+                                    float(rec[0]),
+                                    float(rec[1]),
+                                    float(rec[2]),
+                                    float(rec[3]),
+                                    float(rec[4]),
+                                    float(rec[5]) if rec[5] is not None else float("nan"),
+                                    float(rec[6]) if rec[6] is not None else float("nan"),
+                                    int(rec[7]) if rec[7] is not None else 0,
+                                ]
+                            )
+                        except (TypeError, ValueError):
+                            continue
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            except click.Abort:
+                return
+            except Exception as exc:
+                console.print(f"[red]❌ Failed to read local OHLC data: {exc}[/red]")
+                return
+        else:
+            def _fetch() -> Dict[str, Any]:
+                kwargs: Dict[str, Any] = {"since": since} if since is not None else {}
+                return api_client.get_ohlc_data(normalized_pair, interval=interval, **kwargs)
 
-        result = response.get("result", {}) if isinstance(response, dict) else {}
-        candles, resolved_key = resolve_ohlc_payload(normalized_pair, result)
-        if not candles:
-            sample_keys = [key for key in result.keys() if key != "last"][:5]
-            key_hint = ", ".join(sample_keys) if sample_keys else "none"
-            console.print(
-                f"[yellow]⚠️  No OHLC data returned for {normalized_pair}. Available keys: {key_hint}[/yellow]"
-            )
-            return
+            try:
+                response = call_with_retries(
+                    _fetch,
+                    "OHLC data fetch",
+                    display_label="⏳ Loading OHLC candles",
+                )
+            except Exception as exc:  # pragma: no cover - defensive user message
+                console.print(f"[red]❌ Failed to fetch OHLC data: {exc}[/red]")
+                return
 
-        rows = list(candles)
+            result = response.get("result", {}) if isinstance(response, dict) else {}
+            candles, resolved_key = resolve_ohlc_payload(normalized_pair, result)
+            if not candles:
+                sample_keys = [key for key in result.keys() if key != "last"][:5]
+                key_hint = ", ".join(sample_keys) if sample_keys else "none"
+                console.print(
+                    f"[yellow]⚠️  No OHLC data returned for {normalized_pair}. Available keys: {key_hint}[/yellow]"
+                )
+                return
+            rows = list(candles)
+
         if not rows:
             console.print("[yellow]ℹ️  OHLC payload was empty.[/yellow]")
             return
@@ -724,5 +822,53 @@ def register(
             )
 
         console.print(table)
+
+        # Optional LLM explanation
+        if explain:
+            try:
+                client = PatternLLMClient()
+                if not client.is_enabled:
+                    console.print(
+                        "[yellow]⚠️  LLM explanation disabled. "
+                        "Set PATTERN_LLM_ENABLED=true and "
+                        "PATTERN_LLM_MODEL=<provider>/<model> in environment.[/yellow]"
+                    )
+                else:
+                    ranges_pct = [
+                        ((row["high"] - row["low"]) / row["open"]) * 100.0
+                        for row in converted
+                        if row["open"] > 0.0
+                    ]
+                    avg_range_pct = (
+                        float(sum(ranges_pct) / len(ranges_pct))
+                        if ranges_pct
+                        else 0.0
+                    )
+                    summary_payload = {
+                        "pair": resolved_label,
+                        "interval_minutes": int(interval),
+                        "count": len(converted),
+                        "source": source.lower(),
+                        "since": since,
+                        "time_range": {
+                            "start": converted[0]["time"],
+                            "end": converted[-1]["time"],
+                        },
+                        "stats": {
+                            "last_close": float(converted[-1]["close"]),
+                            "avg_range_pct": avg_range_pct,
+                        },
+                    }
+                    try:
+                        explanation_text = client.explain_ohlc(summary_payload)
+                        console.print(f"Explain: {explanation_text}")
+                    except PatternLLMError as exc:
+                        console.print(
+                            f"[yellow]⚠️  Explanation unavailable: {exc}[/yellow]"
+                        )
+            except Exception:
+                # Defensive: never let explanation path break CLI
+                pass
+
         if last_marker:
             console.print(f"[dim]Next 'since' token: {last_marker}[/dim]")

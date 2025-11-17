@@ -21,6 +21,7 @@ Design notes:
 - Constrained output schema tailored to existing detectors.
 
 Updates:
+    v0.9.18 - 2025-11-17 - Added OHLC explanation method.
     v0.9.17 - 2025-11-17 - Added heatmap explanation method.
     v0.9.16 - 2025-11-17 - Initial LiteLLM client implementation
 """
@@ -201,6 +202,67 @@ class PatternLLMClient:
         )
 
         # Use JSON-encoded user content for structured input
+        user_prompt = json.dumps(summary, ensure_ascii=False)
+
+        try:
+            resp = self._litellm(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+                timeout=self._timeout,
+            )
+        except Exception as exc:
+            raise PatternLLMError(f"LLM provider error: {exc}") from exc
+
+        content = self._extract_text_content(resp)
+        if not content:
+            raise PatternLLMError("LLM returned empty content.")
+        return str(content).strip()
+
+    def explain_ohlc(self, summary: Dict[str, Any]) -> str:
+        """Generate a concise natural-language explanation for an OHLC sample.
+
+        Args:
+            summary: Structured data containing OHLC context:
+                {
+                    "pair": str,
+                    "interval_minutes": int,
+                    "count": int,
+                    "source": "api" | "local",
+                    "since": int | None,
+                    "time_range": {"start": str, "end": str},
+                    "stats": {"last_close": float, "avg_range_pct": float},
+                }
+
+        Returns:
+            Plain-text explanation string suitable for CLI display.
+
+        Raises:
+            PatternLLMError: If LLM is disabled/misconfigured or provider fails.
+        """
+        if not self.is_enabled:
+            raise PatternLLMError(
+                "LLM explanation disabled or not configured. "
+                "Set PATTERN_LLM_ENABLED=true and PATTERN_LLM_MODEL=<provider>/<model>."
+            )
+
+        system_prompt = (
+            "You are a quantitative trading analyst. Given structured OHLC data "
+            "summary, produce a concise explanation (<= 120 words) highlighting:\n"
+            "- Recent trend direction over the sample\n"
+            "- Volatility indication using avg intrabar range (% of open)\n"
+            "- Notable cautionary notes (sampling bias, low count)\n\n"
+            "Constraints:\n"
+            "- Plain text only (no JSON, no markdown)\n"
+            "- Do not provide financial advice\n"
+            "- Include a safety disclaimer: 'Past performance does not guarantee "
+            "future results.'"
+        )
+
         user_prompt = json.dumps(summary, ensure_ascii=False)
 
         try:
