@@ -21,6 +21,7 @@ Design notes:
 - Constrained output schema tailored to existing detectors.
 
 Updates:
+    v0.9.17 - 2025-11-17 - Added heatmap explanation method.
     v0.9.16 - 2025-11-17 - Initial LiteLLM client implementation
 """
 
@@ -156,6 +157,70 @@ class PatternLLMClient:
 
         validated = self._validate_payload(payload, patterns)
         return validated
+
+    def explain_heatmap(self, summary: Dict[str, Any]) -> str:
+        """Generate a concise natural-language explanation for a heatmap.
+
+        Args:
+            summary: Structured data containing heatmap context:
+                {
+                    "pair": str,
+                    "timeframe": str,
+                    "pattern": str,
+                    "group_by": str,
+                    "thresholds": {"min_move_pct": float, "window": int, "lookback_days": int},
+                    "total_filtered_matches": int,
+                    "buckets": [{"bucket": str, "matches": int, "avg_move_pct": float}, ...],
+                }
+
+        Returns:
+            Plain-text explanation string suitable for CLI display.
+
+        Raises:
+            PatternLLMError: If LLM is disabled/misconfigured or provider fails.
+        """
+        if not self.is_enabled:
+            raise PatternLLMError(
+                "LLM explanation disabled or not configured. "
+                "Set PATTERN_LLM_ENABLED=true and PATTERN_LLM_MODEL=<provider>/<model>."
+            )
+
+        # Analyst-style guidance without financial advice; concise and actionable
+        system_prompt = (
+            "You are a quantitative trading analyst. Given structured heatmap "
+            "data for historical pattern performance, produce a concise "
+            "explanation (<= 150 words) highlighting:\n"
+            "- Strongest and weakest buckets (by avg move and matches)\n"
+            "- Reliability notes based on sample sizes\n"
+            "- Practical cautions (e.g., regime changes, day/time biases)\n\n"
+            "Constraints:\n"
+            "- Plain text only (no JSON, no markdown)\n"
+            "- Do not provide financial advice\n"
+            "- Include a safety disclaimer: 'Past performance does not guarantee "
+            "future results.'"
+        )
+
+        # Use JSON-encoded user content for structured input
+        user_prompt = json.dumps(summary, ensure_ascii=False)
+
+        try:
+            resp = self._litellm(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+                timeout=self._timeout,
+            )
+        except Exception as exc:
+            raise PatternLLMError(f"LLM provider error: {exc}") from exc
+
+        content = self._extract_text_content(resp)
+        if not content:
+            raise PatternLLMError("LLM returned empty content.")
+        return str(content).strip()
 
     def _build_system_prompt(self, patterns: list[str]) -> str:
         """Construct system prompt with constraints and schema."""

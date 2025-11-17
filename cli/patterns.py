@@ -11,6 +11,7 @@ Responsibilities:
 - Follow existing CLI dependency initialisation/wiring patterns.
 
 Updates:
+    v0.9.17 - 2025-11-17 - Added LLM-powered --explain option to pattern-heatmap.
     v0.9.16 - 2025-11-17 - Added local OHLC data source support to pattern-heatmap.
     v0.9.15 - 2025-11-16 - Added candlestick hammer and shooting star
         patterns in CLI.
@@ -40,6 +41,7 @@ from analysis.pattern_nl_mapper import (
     PatternDescriptionMapper,
     PatternMappingRequest,
 )
+from analysis.pattern_llm_client import PatternLLMClient, PatternLLMError
 from utils.helpers import format_percentage, format_timestamp
 
 
@@ -563,6 +565,11 @@ def register(
         show_default=True,
         help="Render output as a Rich table or JSON payload.",
     )
+    @click.option(
+        "--explain",
+        is_flag=True,
+        help="Use LLM to explain the heatmap results (requires PATTERN_LLM_* env).",
+    )
     @click.pass_context
     def pattern_heatmap(  # type: ignore[unused-ignore]
         ctx: click.Context,
@@ -577,6 +584,7 @@ def register(
         db_path: Path,
         force_refresh: bool,
         output: str,
+        explain: bool,
     ) -> None:
         """Aggregate pattern matches into time-based heatmap buckets."""
         scanner = _ensure_pattern_scanner(ctx)
@@ -688,6 +696,48 @@ def register(
             )
 
         console.print(table)
+
+        # Optional LLM explanation
+        if explain:
+            try:
+                client = PatternLLMClient()
+                if not client.is_enabled:
+                    console.print(
+                        "[yellow]⚠️  LLM explanation disabled. "
+                        "Set PATTERN_LLM_ENABLED=true and "
+                        "PATTERN_LLM_MODEL=<provider>/<model> in environment.[/yellow]"
+                    )
+                else:
+                    summary_payload = {
+                        "pair": normalized_pair,
+                        "timeframe": timeframe,
+                        "pattern": pattern_name,
+                        "group_by": group_by,
+                        "thresholds": {
+                            "min_move_pct": float(min_move),
+                            "window": int(window),
+                            "lookback_days": int(lookback),
+                        },
+                        "total_filtered_matches": len(filtered),
+                        "buckets": [
+                            {
+                                "bucket": key,
+                                "matches": int(stats.total_matches),
+                                "avg_move_pct": float(stats.average_move_pct),
+                            }
+                            for key, stats in sorted(heatmap.buckets.items())
+                        ],
+                    }
+                    try:
+                        explanation_text = client.explain_heatmap(summary_payload)
+                        console.print(f"Explain: {explanation_text}")
+                    except PatternLLMError as exc:
+                        console.print(
+                            f"[yellow]⚠️  Explanation unavailable: {exc}[/yellow]"
+                        )
+            except Exception:
+                # Defensive: never let explanation path break CLI
+                pass
 
     # -----------------------------
     # Serialization helpers
