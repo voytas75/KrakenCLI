@@ -13,6 +13,7 @@ import logging
 import sqlite3
 import time
 import json
+import csv
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -108,6 +109,145 @@ def _parse_time_input(value: Optional[str]) -> Optional[int]:
         f"Invalid time '{value}'. Provide epoch seconds or "
         "ISO 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS'."
     )
+
+
+def _iter_bars_from_trades_csv(
+    file_path: Path,
+    interval_minutes: int,
+    *,
+    since_ts: Optional[int] = None,
+    until_ts: Optional[int] = None,
+) -> Iterable[List[Any]]:
+    """Yield OHLC bars aggregated from a trades CSV.
+
+    The input CSV must contain rows:
+        timestamp_unix,price,volume
+
+    Args:
+        file_path: Path to the trades CSV file.
+        interval_minutes: Candle interval in minutes.
+        since_ts: Optional inclusive start timestamp (epoch seconds).
+        until_ts: Optional inclusive end timestamp (epoch seconds).
+
+    Yields:
+        Lists in Kraken OHLC format:
+        [time, open, high, low, close, vwap, volume, count]
+    """
+    step = max(1, interval_minutes * 60)
+
+    current_start: Optional[int] = None
+    open_price: Optional[float] = None
+    high_price: Optional[float] = None
+    low_price: Optional[float] = None
+    close_price: Optional[float] = None
+    volume_sum = 0.0
+    vwap_numerator = 0.0
+    trade_count = 0
+
+    def flush_current() -> Optional[List[Any]]:
+        nonlocal current_start, open_price, high_price, low_price, close_price
+        nonlocal volume_sum, vwap_numerator, trade_count
+
+        if current_start is None or trade_count == 0 or open_price is None:
+            return None
+
+        vwap: Optional[float]
+        if volume_sum > 0.0:
+            vwap = vwap_numerator / volume_sum
+            volume_out: Optional[float] = volume_sum
+        else:
+            vwap = None
+            volume_out = None
+
+        bar: List[Any] = [
+            int(current_start),
+            float(open_price),
+            float(high_price if high_price is not None else open_price),
+            float(low_price if low_price is not None else open_price),
+            float(close_price if close_price is not None else open_price),
+            vwap,
+            volume_out,
+            int(trade_count),
+        ]
+
+        current_start = None
+        open_price = None
+        high_price = None
+        low_price = None
+        close_price = None
+        volume_sum = 0.0
+        vwap_numerator = 0.0
+        trade_count = 0
+
+        return bar
+
+    with file_path.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.reader(fh)
+        for row in reader:
+            if not row:
+                continue
+
+            first = row[0].strip()
+            if not first:
+                continue
+            if not (first[0].isdigit() or first.startswith("-")):
+                # Skip header or comment-like lines
+                continue
+
+            try:
+                ts = int(first)
+                price = float(row[1])
+                volume = float(row[2])
+            except (ValueError, IndexError):
+                logger.debug("Skipping malformed trade CSV row: %s", row)
+                continue
+
+            if since_ts is not None and ts < since_ts:
+                continue
+            if until_ts is not None and ts > until_ts:
+                break
+
+            bucket_start = (ts // step) * step
+
+            if current_start is None:
+                current_start = bucket_start
+                open_price = price
+                high_price = price
+                low_price = price
+                close_price = price
+                volume_sum = volume
+                vwap_numerator = price * volume
+                trade_count = 1
+                continue
+
+            if bucket_start != current_start:
+                prev_bar = flush_current()
+                if prev_bar is not None:
+                    yield prev_bar
+
+                current_start = bucket_start
+                open_price = price
+                high_price = price
+                low_price = price
+                close_price = price
+                volume_sum = volume
+                vwap_numerator = price * volume
+                trade_count = 1
+                continue
+
+            # Same bucket: update OHLCV
+            if high_price is None or price > high_price:
+                high_price = price
+            if low_price is None or price < low_price:
+                low_price = price
+            close_price = price
+            volume_sum += volume
+            vwap_numerator += price * volume
+            trade_count += 1
+
+    final_bar = flush_current()
+    if final_bar is not None:
+        yield final_bar
 
 
 def _ensure_db_schema(conn: sqlite3.Connection) -> None:
@@ -1229,3 +1369,741 @@ def register(
             console.print("[green]✅ Sync completed[/green]")
         else:
             console.print("[yellow]ℹ️ No rows inserted[/yellow]")
+    @data.command(name="ohlc-from-trades")
+    @click.option(
+        "--pair",
+        "-p",
+        required=True,
+        help="Trading pair (e.g., ETHUSD)",
+    )
+    @click.option(
+        "--timeframe",
+        "-t",
+        required=True,
+        help="Candle interval label (1m, 5m, 15m, 1h, 4h, 1d)",
+    )
+    @click.option(
+        "--file",
+        "-f",
+        "file_path",
+        type=click.Path(
+            exists=True, dir_okay=False, readable=True, path_type=Path
+        ),
+        required=True,
+        help="Path to trades CSV file (timestamp,price,volume).",
+    )
+    @click.option(
+        "--since",
+        type=str,
+        default=None,
+        help=(
+            "Optional start time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--until",
+        type=str,
+        default=None,
+        help=(
+            "Optional end time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--dry-run",
+        is_flag=True,
+        help="Parse and aggregate CSV but do not write to the database.",
+    )
+    @click.pass_context
+    def ohlc_from_trades(  # type: ignore[unused-ignore]
+        ctx: click.Context,
+        pair: str,
+        timeframe: str,
+        file_path: Path,
+        since: Optional[str],
+        until: Optional[str],
+        dry_run: bool,
+    ) -> None:
+        """Import OHLC candles into SQLite from a trades CSV.
+
+        The CSV must contain trade-level rows:
+            timestamp_unix,price,volume
+
+        Examples:
+            # Import 1-minute candles for ETHUSD from trades.csv
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 1m -f trades.csv
+
+            # Import 5-minute candles for a specific window
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 5m -f trades.csv \\
+                --since 2015-08-07 --until 2015-08-10
+        """
+        interval_minutes = _parse_timeframe_label(timeframe)
+        request_pair = pair.upper()
+
+        start_ts = _parse_time_input(since)
+        end_ts = _parse_time_input(until)
+
+        if start_ts is not None and end_ts is not None and end_ts < start_ts:
+            raise click.BadParameter(
+                f"Invalid window: until ({end_ts}) is earlier than since ({start_ts})."
+            )
+
+        # Prepare database
+        try:
+            DB_PATH_DEFAULT.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            console.print(f"[red]❌ Failed to prepare data directory: {exc}[/red]")
+            return
+
+        try:
+            conn = sqlite3.connect(DB_PATH_DEFAULT.as_posix())
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to open database: {exc}[/red]")
+            return
+
+        try:
+            _ensure_db_schema(conn)
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to initialize schema: {exc}[/red]")
+            conn.close()
+            return
+
+        window_desc = f"{start_ts or '-∞'} → {end_ts or '+∞'}"
+        console.print(
+            Panel.fit(
+                f"Pair: [cyan]{request_pair}[/cyan]\n"
+                f"Timeframe: [cyan]{timeframe}[/cyan] "
+                f"([green]{interval_minutes} min[/green])\n"
+                f"Window: [cyan]{window_desc}[/cyan]\n"
+                f"Source CSV: [magenta]{file_path}[/magenta]\n"
+                f"DB: [magenta]{DB_PATH_DEFAULT}[/magenta]\n"
+                f"Dry-run: [yellow]{'yes' if dry_run else 'no'}[/yellow]",
+                title="OHLC Import from Trades",
+                border_style="blue",
+            )
+        )
+
+        inserted_total = 0
+        generated_total = 0
+
+        try:
+            batch: List[List[Any]] = []
+            batch_size = 500
+
+            for bar in _iter_bars_from_trades_csv(
+                file_path=file_path,
+                interval_minutes=interval_minutes,
+                since_ts=start_ts,
+                until_ts=end_ts,
+            ):
+                generated_total += 1
+                batch.append(bar)
+
+                if not dry_run and len(batch) >= batch_size:
+                    try:
+                        inserted_total += _insert_bars(
+                            conn, request_pair, interval_minutes, batch
+                        )
+                    except sqlite3.Error as exc:
+                        console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                        conn.close()
+                        return
+                    finally:
+                        batch.clear()
+
+            # Flush any remaining bars
+            if batch and not dry_run:
+                try:
+                    inserted_total += _insert_bars(
+                        conn, request_pair, interval_minutes, batch
+                    )
+                except sqlite3.Error as exc:
+                    console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                    conn.close()
+                    return
+        except OSError as exc:
+            console.print(f"[red]❌ File read failed: {exc}[/red]")
+            conn.close()
+            return
+        finally:
+            conn.close()
+
+        table = Table(title="OHLC Import from Trades Summary")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Pair", request_pair)
+        table.add_row("Timeframe", f"{timeframe} ({interval_minutes}m)")
+        table.add_row("Generated Candles", str(generated_total))
+        if dry_run:
+            table.add_row("Inserted Bars", "0 (dry-run)")
+        else:
+            table.add_row("Inserted Bars", str(inserted_total))
+        table.add_row("DB Path", str(DB_PATH_DEFAULT))
+        console.print(table)
+
+        if generated_total == 0:
+            console.print(
+                "[yellow]ℹ️ No candles generated from the provided trades CSV[/yellow]"
+            )
+        elif dry_run:
+            console.print(
+                "[green]✅ Dry-run completed (no changes written to database)[/green]"
+            )
+        elif inserted_total > 0:
+            console.print("[green]✅ OHLC import completed[/green]")
+        else:
+            console.print(
+                "[yellow]ℹ️ Candles were generated but all already existed in DB[/yellow]"
+            )
+    @data.command(name="ohlc-from-trades")
+    @click.option(
+        "--pair",
+        "-p",
+        required=True,
+        help="Trading pair (e.g., ETHUSD)",
+    )
+    @click.option(
+        "--timeframe",
+        "-t",
+        required=True,
+        help="Candle interval label (1m, 5m, 15m, 1h, 4h, 1d)",
+    )
+    @click.option(
+        "--file",
+        "-f",
+        "file_path",
+        type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+        required=True,
+        help="Path to trades CSV file (timestamp,price,volume).",
+    )
+    @click.option(
+        "--since",
+        type=str,
+        default=None,
+        help="Optional start time (epoch seconds or ISO 'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S').",
+    )
+    @click.option(
+        "--until",
+        type=str,
+        default=None,
+        help="Optional end time (epoch seconds or ISO 'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S').",
+    )
+    @click.option(
+        "--dry-run",
+        is_flag=True,
+        help="Parse and aggregate CSV but do not write to the database.",
+    )
+    @click.pass_context
+    def ohlc_from_trades(  # type: ignore[unused-ignore]
+        ctx: click.Context,
+        pair: str,
+        timeframe: str,
+        file_path: Path,
+        since: Optional[str],
+        until: Optional[str],
+        dry_run: bool,
+    ) -> None:
+        """Import OHLC candles into SQLite from a trades CSV.
+
+        The CSV must contain trade-level rows:
+            timestamp_unix,price,volume
+
+        Examples:
+            # Import 1-minute candles for ETHUSD from trades.csv
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 1m -f trades.csv
+
+            # Import 5-minute candles for a specific window
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 5m -f trades.csv \\
+                --since 2015-08-07 --until 2015-08-10
+        """
+        interval_minutes = _parse_timeframe_label(timeframe)
+        request_pair = pair.upper()
+
+        start_ts = _parse_time_input(since)
+        end_ts = _parse_time_input(until)
+
+        if start_ts is not None and end_ts is not None and end_ts < start_ts:
+            raise click.BadParameter(
+                f"Invalid window: until ({end_ts}) is earlier than since ({start_ts})."
+            )
+
+        # Prepare database
+        try:
+            DB_PATH_DEFAULT.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            console.print(f"[red]❌ Failed to prepare data directory: {exc}[/red]")
+            return
+
+        try:
+            conn = sqlite3.connect(DB_PATH_DEFAULT.as_posix())
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to open database: {exc}[/red]")
+            return
+
+        try:
+            _ensure_db_schema(conn)
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to initialize schema: {exc}[/red]")
+            conn.close()
+            return
+
+        window_desc = f"{start_ts or '-∞'} → {end_ts or '+∞'}"
+        console.print(
+            Panel.fit(
+                f"Pair: [cyan]{request_pair}[/cyan]\n"
+                f"Timeframe: [cyan]{timeframe}[/cyan] "
+                f"([green]{interval_minutes} min[/green])\n"
+                f"Window: [cyan]{window_desc}[/cyan]\n"
+                f"Source CSV: [magenta]{file_path}[/magenta]\n"
+                f"DB: [magenta]{DB_PATH_DEFAULT}[/magenta]\n"
+                f"Dry-run: [yellow]{'yes' if dry_run else 'no'}[/yellow]",
+                title="OHLC Import from Trades",
+                border_style="blue",
+            )
+        )
+
+        inserted_total = 0
+        generated_total = 0
+
+        try:
+            batch: List[List[Any]] = []
+            batch_size = 500
+
+            for bar in _iter_bars_from_trades_csv(
+                file_path=file_path,
+                interval_minutes=interval_minutes,
+                since_ts=start_ts,
+                until_ts=end_ts,
+            ):
+                generated_total += 1
+                batch.append(bar)
+                if not dry_run and len(batch) >= batch_size:
+                    try:
+                        inserted_total += _insert_bars(
+                            conn, request_pair, interval_minutes, batch
+                        )
+                    except sqlite3.Error as exc:
+                        console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                        conn.close()
+                        return
+                    finally:
+                        batch.clear()
+
+            if batch and not dry_run:
+                try:
+                    inserted_total += _insert_bars(
+                        conn, request_pair, interval_minutes, batch
+                    )
+                except sqlite3.Error as exc:
+                    console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                    conn.close()
+                    return
+        except OSError as exc:
+            console.print(f"[red]❌ File read failed: {exc}[/red]")
+            conn.close()
+            return
+        finally:
+            conn.close()
+
+        table = Table(title="OHLC Import from Trades Summary")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Pair", request_pair)
+        table.add_row("Timeframe", f"{timeframe} ({interval_minutes}m)")
+        table.add_row("Generated Candles", str(generated_total))
+        if dry_run:
+            table.add_row("Inserted Bars", "0 (dry-run)")
+        else:
+            table.add_row("Inserted Bars", str(inserted_total))
+        table.add_row("DB Path", str(DB_PATH_DEFAULT))
+        console.print(table)
+
+        if generated_total == 0:
+            console.print(
+                "[yellow]ℹ️ No candles generated from the provided trades CSV[/yellow]"
+            )
+        elif dry_run:
+            console.print(
+                "[green]✅ Dry-run completed (no changes written to database)[/green]"
+            )
+        elif inserted_total > 0:
+            console.print("[green]✅ OHLC import completed[/green]")
+        else:
+            console.print(
+                "[yellow]ℹ️ Candles were generated but all already existed in DB[/yellow]"
+            )
+    @data.command(name="ohlc-from-trades")
+    @click.option(
+        "--pair",
+        "-p",
+        required=True,
+        help="Trading pair (e.g., ETHUSD)",
+    )
+    @click.option(
+        "--timeframe",
+        "-t",
+        required=True,
+        help="Candle interval label (1m, 5m, 15m, 1h, 4h, 1d)",
+    )
+    @click.option(
+        "--file",
+        "-f",
+        "file_path",
+        type=click.Path(
+            exists=True, dir_okay=False, readable=True, path_type=Path
+        ),
+        required=True,
+        help="Path to trades CSV file (timestamp,price,volume).",
+    )
+    @click.option(
+        "--since",
+        type=str,
+        default=None,
+        help=(
+            "Optional start time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--until",
+        type=str,
+        default=None,
+        help=(
+            "Optional end time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--dry-run",
+        is_flag=True,
+        help="Parse and aggregate CSV but do not write to the database.",
+    )
+    @click.pass_context
+    def ohlc_from_trades(  # type: ignore[unused-ignore]
+        ctx: click.Context,
+        pair: str,
+        timeframe: str,
+        file_path: Path,
+        since: Optional[str],
+        until: Optional[str],
+        dry_run: bool,
+    ) -> None:
+        """Import OHLC candles into SQLite from a trades CSV.
+
+        The CSV must contain trade-level rows:
+            timestamp_unix,price,volume
+
+        Examples:
+            # Import 1-minute candles for ETHUSD from trades.csv
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 1m -f trades.csv
+
+            # Import 5-minute candles for a specific window
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 5m -f trades.csv \\
+                --since 2015-08-07 --until 2015-08-10
+        """
+        interval_minutes = _parse_timeframe_label(timeframe)
+        request_pair = pair.upper()
+
+        start_ts = _parse_time_input(since)
+        end_ts = _parse_time_input(until)
+
+        if start_ts is not None and end_ts is not None and end_ts < start_ts:
+            raise click.BadParameter(
+                f"Invalid window: until ({end_ts}) is earlier than since ({start_ts})."
+            )
+
+        # Prepare database
+        try:
+            DB_PATH_DEFAULT.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            console.print(f"[red]❌ Failed to prepare data directory: {exc}[/red]")
+            return
+
+        try:
+            conn = sqlite3.connect(DB_PATH_DEFAULT.as_posix())
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to open database: {exc}[/red]")
+            return
+
+        try:
+            _ensure_db_schema(conn)
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to initialize schema: {exc}[/red]")
+            conn.close()
+            return
+
+        window_desc = f"{start_ts or '-∞'} → {end_ts or '+∞'}"
+        console.print(
+            Panel.fit(
+                f"Pair: [cyan]{request_pair}[/cyan]\n"
+                f"Timeframe: [cyan]{timeframe}[/cyan] "
+                f"([green]{interval_minutes} min[/green])\n"
+                f"Window: [cyan]{window_desc}[/cyan]\n"
+                f"Source CSV: [magenta]{file_path}[/magenta]\n"
+                f"DB: [magenta]{DB_PATH_DEFAULT}[/magenta]\n"
+                f"Dry-run: [yellow]{'yes' if dry_run else 'no'}[/yellow]",
+                title="OHLC Import from Trades",
+                border_style="blue"
+            )
+        )
+
+        inserted_total = 0
+        generated_total = 0
+
+        try:
+            batch: List[List[Any]] = []
+            batch_size = 500
+
+            for bar in _iter_bars_from_trades_csv(
+                file_path=file_path,
+                interval_minutes=interval_minutes,
+                since_ts=start_ts,
+                until_ts=end_ts,
+            ):
+                generated_total += 1
+                batch.append(bar)
+
+                if not dry_run and len(batch) >= batch_size:
+                    try:
+                        inserted_total += _insert_bars(
+                            conn, request_pair, interval_minutes, batch
+                        )
+                    except sqlite3.Error as exc:
+                        console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                        conn.close()
+                        return
+                    finally:
+                        batch.clear()
+
+            # Flush any remaining bars
+            if batch and not dry_run:
+                try:
+                    inserted_total += _insert_bars(
+                        conn, request_pair, interval_minutes, batch
+                    )
+                except sqlite3.Error as exc:
+                    console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                    conn.close()
+                    return
+        except OSError as exc:
+            console.print(f"[red]❌ File read failed: {exc}[/red]")
+            conn.close()
+            return
+        finally:
+            conn.close()
+
+        table = Table(title="OHLC Import from Trades Summary")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Pair", request_pair)
+        table.add_row("Timeframe", f"{timeframe} ({interval_minutes}m)")
+        table.add_row("Generated Candles", str(generated_total))
+        if dry_run:
+            table.add_row("Inserted Bars", "0 (dry-run)")
+        else:
+            table.add_row("Inserted Bars", str(inserted_total))
+        table.add_row("DB Path", str(DB_PATH_DEFAULT))
+        console.print(table)
+
+        if generated_total == 0:
+            console.print(
+                "[yellow]ℹ️ No candles generated from the provided trades CSV[/yellow]"
+            )
+        elif dry_run:
+            console.print(
+                "[green]✅ Dry-run completed (no changes written to database)[/green]"
+            )
+        elif inserted_total > 0:
+            console.print("[green]✅ OHLC import completed[/green]")
+        else:
+            console.print(
+                "[yellow]ℹ️ Candles were generated but all already existed in DB[/yellow]"
+            )
+    @data.command(name="ohlc-from-trades")
+    @click.option(
+        "--pair",
+        "-p",
+        required=True,
+        help="Trading pair (e.g., ETHUSD)",
+    )
+    @click.option(
+        "--timeframe",
+        "-t",
+        required=True,
+        help="Candle interval label (1m, 5m, 15m, 1h, 4h, 1d)",
+    )
+    @click.option(
+        "--file",
+        "-f",
+        "file_path",
+        type=click.Path(
+            exists=True, dir_okay=False, readable=True, path_type=Path
+        ),
+        required=True,
+        help="Path to trades CSV file (timestamp,price,volume).",
+    )
+    @click.option(
+        "--since",
+        type=str,
+        default=None,
+        help=(
+            "Optional start time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--until",
+        type=str,
+        default=None,
+        help=(
+            "Optional end time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--dry-run",
+        is_flag=True,
+        help="Parse and aggregate CSV but do not write to the database.",
+    )
+    @click.pass_context
+    def ohlc_from_trades(  # type: ignore[unused-ignore]
+        ctx: click.Context,
+        pair: str,
+        timeframe: str,
+        file_path: Path,
+        since: Optional[str],
+        until: Optional[str],
+        dry_run: bool,
+    ) -> None:
+        """Import OHLC candles into SQLite from a trades CSV.
+
+        The CSV must contain trade-level rows:
+            timestamp_unix,price,volume
+
+        Examples:
+            # Import 1-minute candles for ETHUSD from trades.csv
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 1m -f trades.csv
+
+            # Import 5-minute candles for a specific window
+            python kraken_cli.py data ohlc-from-trades -p ETHUSD -t 5m -f trades.csv \\
+                --since 2015-08-07 --until 2015-08-10
+        """
+        interval_minutes = _parse_timeframe_label(timeframe)
+        request_pair = pair.upper()
+
+        start_ts = _parse_time_input(since)
+        end_ts = _parse_time_input(until)
+
+        if start_ts is not None and end_ts is not None and end_ts < start_ts:
+            raise click.BadParameter(
+                f"Invalid window: until ({end_ts}) is earlier than since ({start_ts})."
+            )
+
+        # Prepare database
+        try:
+            DB_PATH_DEFAULT.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            console.print(f"[red]❌ Failed to prepare data directory: {exc}[/red]")
+            return
+
+        try:
+            conn = sqlite3.connect(DB_PATH_DEFAULT.as_posix())
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to open database: {exc}[/red]")
+            return
+
+        try:
+            _ensure_db_schema(conn)
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to initialize schema: {exc}[/red]")
+            conn.close()
+            return
+
+        window_desc = f"{start_ts or '-∞'} → {end_ts or '+∞'}"
+        console.print(
+            Panel.fit(
+                f"Pair: [cyan]{request_pair}[/cyan]\n"
+                f"Timeframe: [cyan]{timeframe}[/cyan] "
+                f"([green]{interval_minutes} min[/green])\n"
+                f"Window: [cyan]{window_desc}[/cyan]\n"
+                f"Source CSV: [magenta]{file_path}[/magenta]\n"
+                f"DB: [magenta]{DB_PATH_DEFAULT}[/magenta]\n"
+                f"Dry-run: [yellow]{'yes' if dry_run else 'no'}[/yellow]",
+                title="OHLC Import from Trades",
+                border_style="blue",
+            )
+        )
+
+        inserted_total = 0
+        generated_total = 0
+
+        try:
+            batch: List[List[Any]] = []
+            batch_size = 500
+
+            for bar in _iter_bars_from_trades_csv(
+                file_path=file_path,
+                interval_minutes=interval_minutes,
+                since_ts=start_ts,
+                until_ts=end_ts,
+            ):
+                generated_total += 1
+                batch.append(bar)
+
+                if not dry_run and len(batch) >= batch_size:
+                    try:
+                        inserted_total += _insert_bars(
+                            conn, request_pair, interval_minutes, batch
+                        )
+                    except sqlite3.Error as exc:
+                        console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                        conn.close()
+                        return
+                    finally:
+                        batch.clear()
+
+            # Flush any remaining bars
+            if batch and not dry_run:
+                try:
+                    inserted_total += _insert_bars(
+                        conn, request_pair, interval_minutes, batch
+                    )
+                except sqlite3.Error as exc:
+                    console.print(f"[red]❌ DB insert failed: {exc}[/red]")
+                    conn.close()
+                    return
+        except OSError as exc:
+            console.print(f"[red]❌ File read failed: {exc}[/red]")
+            conn.close()
+            return
+        finally:
+            conn.close()
+
+        table = Table(title="OHLC Import from Trades Summary")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Pair", request_pair)
+        table.add_row("Timeframe", f"{timeframe} ({interval_minutes}m)")
+        table.add_row("Generated Candles", str(generated_total))
+        if dry_run:
+            table.add_row("Inserted Bars", "0 (dry-run)")
+        else:
+            table.add_row("Inserted Bars", str(inserted_total))
+        table.add_row("DB Path", str(DB_PATH_DEFAULT))
+        console.print(table)
+
+        if generated_total == 0:
+            console.print(
+                "[yellow]ℹ️ No candles generated from the provided trades CSV[/yellow]"
+            )
+        elif dry_run:
+            console.print(
+                "[green]✅ Dry-run completed (no changes written to database)[/green]"
+            )
+        elif inserted_total > 0:
+            console.print("[green]✅ OHLC import completed[/green]")
+        else:
+            console.print(
+                "[yellow]ℹ️ Candles were generated but all already existed in DB[/yellow]"
+            )
