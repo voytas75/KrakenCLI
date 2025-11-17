@@ -287,6 +287,8 @@ def register(
             )
             raise click.Abort()
 
+        detector_params: dict[str, Any] | None = None
+
         if describe:
             mapper = PatternDescriptionMapper()
             req = PatternMappingRequest(
@@ -306,6 +308,13 @@ def register(
             mapping_source = mapping.source
             mapping_confidence = mapping.confidence
             mapping_notes = mapping.notes
+
+            # Detector params for dynamic patterns
+            if pattern_name == "single_candle_move":
+                detector_params = {
+                    "threshold_pct": (mapping.threshold_pct or 5.0),
+                    "direction": direction_filter,
+                }
         else:
             pattern_name = (pattern or "").lower().strip()
 
@@ -339,6 +348,7 @@ def register(
                     force_refresh=force_refresh,
                     data_source=source.lower(),
                     db_path=db_path if source.lower() == "local" else None,
+                    detector_params=detector_params,
                 ),
                 "Pattern scan",
                 display_label="⏳ Scanning pattern",
@@ -378,6 +388,7 @@ def register(
                     "direction": direction_filter,
                     "confidence": mapping_confidence,
                     "notes": mapping_notes,
+                    "threshold_pct": (detector_params or {}).get("threshold_pct"),
                 },
             }
             if export_snapshots:
@@ -431,6 +442,10 @@ def register(
         summary_table.add_row("Lookback (days)", str(lookback))
         if direction_filter:
             summary_table.add_row("Direction Filter", direction_filter)
+        if detector_params and detector_params.get("threshold_pct") is not None:
+            summary_table.add_row(
+                "Threshold %", format_percentage(detector_params["threshold_pct"], decimals=2)
+            )
         summary_table.add_row("Mapping Source", mapping_source)
         if mapping_confidence is not None:
             summary_table.add_row("Mapping Confidence", f"{mapping_confidence:.2f}")

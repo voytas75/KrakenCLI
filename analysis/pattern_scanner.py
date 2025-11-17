@@ -151,6 +151,7 @@ class PatternScanner:
             "macd_signal_cross": self._detect_macd_signal_cross,
             "candle_hammer": self._detect_candle_hammer,
             "candle_shooting_star": self._detect_candle_shooting_star,
+            "single_candle_move": self._detect_single_candle_move,
         }
 
     def scan_pattern(
@@ -163,6 +164,7 @@ class PatternScanner:
         force_refresh: bool = False,
         data_source: str = "api",
         db_path: Path | None = None,
+        detector_params: Dict[str, Any] | None = None,
     ) -> tuple[PatternStats, List[PatternMatch], List[PatternSnapshot]]:
         """Scan OHLC data for the requested pattern.
 
@@ -239,12 +241,22 @@ class PatternScanner:
         if ohlc_frame.empty:
             raise ValueError("No OHLC data available for pattern scan.")
 
-        matches = detector(
-            ohlc_frame,
-            pair.upper(),
-            int(timeframe),
-            self.DEFAULT_MOVE_WINDOW,
-        )
+        try:
+            matches = detector(
+                ohlc_frame,
+                pair.upper(),
+                int(timeframe),
+                self.DEFAULT_MOVE_WINDOW,
+                **(detector_params or {}),
+            )
+        except TypeError:
+            # Detector does not accept extra parameters, call baseline signature
+            matches = detector(
+                ohlc_frame,
+                pair.upper(),
+                int(timeframe),
+                self.DEFAULT_MOVE_WINDOW,
+            )
         stats = self._compute_stats(
             pair.upper(),
             int(timeframe),
@@ -1136,4 +1148,97 @@ class PatternScanner:
                 ),
             )
         
+        return matches
+
+    def _detect_single_candle_move(
+        self,
+        frame: pd.DataFrame,
+        pair: str,
+        timeframe: int,
+        window: int,
+        *,
+        threshold_pct: float = 5.0,
+        direction: Optional[str] = None,
+    ) -> List[PatternMatch]:
+        """Detect single-candle percent moves matching a user threshold.
+
+        A match occurs when the percent change from open to close within a
+        single candle meets or exceeds the provided threshold. If a direction
+        is specified:
+            - 'bullish': (close - open) / open >= threshold_pct
+            - 'bearish': (close - open) / open <= -threshold_pct
+        When no direction is specified, both sides are considered.
+
+        The move_pct stored in PatternMatch is the subsequent move over the
+        provided future window (consistent with other detectors).
+
+        Args:
+            frame: OHLC dataframe with columns: time, open, high, low, close.
+            pair: Trading pair label (e.g., 'ETHUSD').
+            timeframe: Candle interval in minutes.
+            window: Future window used to compute subsequent move in percent.
+            threshold_pct: Required single-candle percent change (0.1..50.0).
+            direction: Optional side filter ('bullish' or 'bearish').
+
+        Returns:
+            List of PatternMatch entries for detected single-candle moves.
+        """
+        open_s = frame["open"]
+        close_s = frame["close"]
+
+        # Normalise threshold bounds defensively
+        try:
+            th = float(threshold_pct)
+        except (TypeError, ValueError):
+            th = 5.0
+        th = max(0.1, min(th, 50.0))
+
+        matches: List[PatternMatch] = []
+        for idx in range(len(frame)):
+            o = open_s.iloc[idx]
+            c = close_s.iloc[idx]
+            if any(pd.isna(v) for v in (o, c)):
+                continue
+            if o <= 0.0:
+                continue
+
+            candle_move_pct = (c / o - 1.0) * 100.0
+
+            # Apply direction filtering
+            if direction == "bullish":
+                if candle_move_pct < th:
+                    continue
+                dir_label = "bullish"
+            elif direction == "bearish":
+                if candle_move_pct > -th:
+                    continue
+                dir_label = "bearish"
+            else:
+                if abs(candle_move_pct) < th:
+                    continue
+                dir_label = "bullish" if candle_move_pct >= 0.0 else "bearish"
+
+            future_index = idx + window
+            if future_index >= len(frame):
+                continue
+
+            entry_price = float(close_s.iloc[idx])
+            future_price = float(close_s.iloc[future_index])
+            if entry_price <= 0.0:
+                continue
+
+            move_pct = (future_price / entry_price - 1.0) * 100.0
+            matches.append(
+                PatternMatch(
+                    pair=pair,
+                    timeframe=timeframe,
+                    pattern_name="single_candle_move",
+                    direction=dir_label,
+                    triggered_at=float(frame["time"].iloc[idx]),
+                    close_price=entry_price,
+                    move_pct=move_pct,
+                    window=window,
+                ),
+            )
+
         return matches

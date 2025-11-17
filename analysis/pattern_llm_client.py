@@ -167,7 +167,7 @@ class PatternLLMClient:
             "- OUTPUT STRICT JSON ONLY (no prose, no markdown).",
             "- Choose exactly one 'pattern_name' from SUPPORTED PATTERNS.",
             "- Optional fields allowed: 'direction', 'move_window',",
-            "  'rsi_oversold', 'rsi_overbought', 'confidence', 'notes'.",
+            "  'rsi_oversold', 'rsi_overbought', 'threshold_pct', 'confidence', 'notes'.",
             "- Enforce constraints:",
             "  * direction ∈ {'bullish','bearish','both'}",
             "  * move_window ∈ [1, 50] (integer)",
@@ -190,13 +190,14 @@ class PatternLLMClient:
                 "description": description,
                 "supported_patterns": patterns,
                 "output_schema_example": {
-                    "pattern_name": "macd_signal_cross",
+                    "pattern_name": "single_candle_move",
                     "direction": "bullish",
                     "move_window": 24,
                     "rsi_oversold": None,
                     "rsi_overbought": None,
+                    "threshold_pct": 5.0,
                     "confidence": 0.9,
-                    "notes": "Mapped to MACD signal cross; bullish bias.",
+                    "notes": "Single-candle percent move threshold mapping.",
                 },
             },
             ensure_ascii=False,
@@ -297,6 +298,15 @@ class PatternLLMClient:
             result["confidence"] = confidence
         else:
             result["confidence"] = None
+
+        # threshold_pct
+        threshold_pct = _get_opt_float("threshold_pct")
+        if threshold_pct is not None:
+            if threshold_pct < 0.1 or threshold_pct > 50.0:
+                raise PatternLLMError(f"threshold_pct out of bounds: {threshold_pct}")
+            result["threshold_pct"] = threshold_pct
+        else:
+            result["threshold_pct"] = None
 
         # notes
         result["notes"] = _get_opt_str("notes")

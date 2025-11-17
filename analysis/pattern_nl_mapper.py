@@ -41,6 +41,7 @@ SUPPORTED_PATTERNS: tuple[str, ...] = (
     "macd_signal_cross",
     "candle_hammer",
     "candle_shooting_star",
+    "single_candle_move",
 )
 
 
@@ -71,6 +72,7 @@ class PatternMappingResult:
         move_window: Optional future window (1..50) for move percentage.
         rsi_oversold: Optional RSI oversold threshold (5..50).
         rsi_overbought: Optional RSI overbought threshold (50..95).
+        threshold_pct: Optional percent threshold for single-candle move (0.1..50).
         confidence: Optional confidence score (0..1).
         source: Mapping source ('rule-based' or 'llm').
         notes: Optional notes/hints about mapping decisions.
@@ -81,6 +83,7 @@ class PatternMappingResult:
     move_window: Optional[int] = None
     rsi_oversold: Optional[float] = None
     rsi_overbought: Optional[float] = None
+    threshold_pct: Optional[float] = None
     confidence: Optional[float] = None
     source: str = "rule-based"
     notes: Optional[str] = None
@@ -169,6 +172,39 @@ class PatternDescriptionMapper:
         """Return mapping via keyword/regex heuristics or None if inconclusive."""
         text = (description or "").lower()
 
+        # First: explicit single-candle percent move (e.g., "up 5% in one candle")
+        if "single_candle_move" in patterns:
+            percent_match = re.search(r"(\d{1,3})\s*%", text)
+            candle_match = re.search(r"\b(one|1)\s+(candle|bar|period)\b", text) or re.search(
+                r"\b(candle|bar|period)\b", text
+            )
+            if percent_match and candle_match:
+                try:
+                    threshold = float(percent_match.group(1))
+                except (TypeError, ValueError):
+                    threshold = None
+
+                if threshold is not None and 0.1 <= threshold <= 50.0:
+                    dir_hint: Optional[str] = None
+                    if re.search(r"\b(up|rise|increase|gain)\b", text):
+                        dir_hint = "bullish"
+                    elif re.search(r"\b(down|fall|decrease|drop|loss)\b", text):
+                        dir_hint = "bearish"
+
+                    result = PatternMappingResult(
+                        pattern_name="single_candle_move",
+                        direction=dir_hint,
+                        move_window=_extract_move_window(text),
+                        rsi_oversold=_extract_rsi_level(text, kind="oversold"),
+                        rsi_overbought=_extract_rsi_level(text, kind="overbought"),
+                        threshold_pct=threshold,
+                        confidence=0.95,
+                        source="rule-based",
+                        notes=None,
+                    )
+                    _validate_result(result, patterns)
+                    return result
+
         # Direction hints
         direction: Optional[str] = None
         if re.search(r"\b(bullish|long)\b", text):
@@ -232,6 +268,7 @@ class PatternDescriptionMapper:
             move_window=move_window,
             rsi_oversold=rsi_oversold,
             rsi_overbought=rsi_overbought,
+            threshold_pct=None,
             confidence=confidence,
             source="rule-based",
             notes=None,
@@ -300,6 +337,19 @@ def _norm_confidence(value: Any) -> Optional[float]:
     return x
 
 
+def _norm_threshold_pct(value: Any) -> Optional[float]:
+    """Normalise single-candle percent threshold (bounds: 0.1..50.0)."""
+    if value is None or value == "":
+        return None
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    if x < 0.1 or x > 50.0:
+        return None
+    return x
+
+
 def _validate_result(result: PatternMappingResult, patterns: Iterable[str]) -> None:
     """Validate final mapping result within constraints."""
     if result.pattern_name not in patterns:
@@ -319,6 +369,10 @@ def _validate_result(result: PatternMappingResult, patterns: Iterable[str]) -> N
     if result.rsi_overbought is not None:
         if result.rsi_overbought < 50.0 or result.rsi_overbought > 95.0:
             raise ValueError(f"rsi_overbought out of bounds: {result.rsi_overbought}")
+
+    if result.threshold_pct is not None:
+        if result.threshold_pct < 0.1 or result.threshold_pct > 50.0:
+            raise ValueError(f"threshold_pct out of bounds: {result.threshold_pct}")
 
     if result.confidence is not None:
         if result.confidence < 0.0 or result.confidence > 1.0:
