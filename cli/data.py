@@ -40,7 +40,6 @@ _TIMEFRAME_LABEL_TO_MINUTES: Dict[str, int] = {
     "1d": 1440,
 }
 
-
 def _parse_timeframe_label(label: str) -> int:
     """Convert a timeframe label to minutes.
 
