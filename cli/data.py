@@ -2107,3 +2107,196 @@ def register(
             console.print(
                 "[yellow]ℹ️ Candles were generated but all already existed in DB[/yellow]"
             )
+    @data.command(name="ohlc-report")
+    @click.option(
+        "--pair",
+        "-p",
+        required=True,
+        help="Trading pair (e.g., ETHUSD)",
+    )
+    @click.option(
+        "--timeframe",
+        "-t",
+        required=True,
+        help="Candle interval label (1m, 5m, 15m, 1h, 4h, 1d)",
+    )
+    @click.option(
+        "--since",
+        type=str,
+        default=None,
+        help=(
+            "Start time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--until",
+        type=str,
+        default=None,
+        help=(
+            "End time (epoch seconds or ISO "
+            "'YYYY-MM-DD' or 'YYYY-MM-DDT%H:%M:%S')."
+        ),
+    )
+    @click.option(
+        "--output",
+        type=click.Choice(["table", "json"], case_sensitive=False),
+        default="table",
+        show_default=True,
+        help="Output format for coverage report.",
+    )
+    @click.pass_context
+    def ohlc_report(  # type: ignore[unused-ignore]
+        ctx: click.Context,
+        pair: str,
+        timeframe: str,
+        since: Optional[str],
+        until: Optional[str],
+        output: str,
+    ) -> None:
+        """Report local OHLC coverage and gaps for a time window.
+        
+        This command reads the local SQLite `ohlc_bars` store and computes
+        how complete your OHLC history is for the requested pair/timeframe,
+        along with contiguous missing ranges (“gaps”). It does not contact
+        Kraken APIs.
+        
+        Examples:
+            # Coverage report (last 365 days by default)
+            python kraken_cli.py data ohlc-report -p ETHUSD -t 1h
+            
+            # Explicit window with human-readable tables
+            python kraken_cli.py data ohlc-report -p ETHUSD -t 15m \\
+                --since 2025-01-01 --until 2025-03-01
+            
+            # JSON output for scripting
+            python kraken_cli.py data ohlc-report -p ETHUSD -t 1h \\
+                --since 2025-01-01 --until 2025-03-01 --output json
+        """
+        interval_minutes = _parse_timeframe_label(timeframe)
+        request_pair = pair.upper()
+        
+        now_sec = int(time.time())
+        start_ts = _parse_time_input(since)
+        end_ts = _parse_time_input(until)
+        
+        # Default window: last 365 days when no bounds provided
+        DEFAULT_REPORT_DAYS = 365
+        if start_ts is None and end_ts is None:
+            end_ts = now_sec
+            start_ts = max(0, end_ts - DEFAULT_REPORT_DAYS * 86400)
+        elif start_ts is None and end_ts is not None:
+            start_ts = max(0, end_ts - DEFAULT_REPORT_DAYS * 86400)
+        elif start_ts is not None and end_ts is None:
+            end_ts = now_sec
+        
+        assert start_ts is not None and end_ts is not None
+        
+        if end_ts < start_ts:
+            raise click.BadParameter(
+                f"Invalid window: until ({end_ts}) is earlier than since ({start_ts})."
+            )
+        
+        # Prepare database
+        try:
+            DB_PATH_DEFAULT.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            console.print(f"[red]❌ Failed to prepare data directory: {exc}[/red]")
+            return
+        
+        try:
+            conn = sqlite3.connect(DB_PATH_DEFAULT.as_posix())
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to open database: {exc}[/red]")
+            return
+        
+        try:
+            _ensure_db_schema(conn)
+        except sqlite3.Error as exc:
+            console.print(f"[red]❌ Failed to initialize schema: {exc}[/red]")
+            conn.close()
+            return
+        
+        # Header panel
+        step_seconds = interval_minutes * 60
+        window_desc = f"{start_ts} → {end_ts}"
+        console.print(
+            Panel.fit(
+                f"Pair: [cyan]{request_pair}[/cyan]\n"
+                f"Timeframe: [cyan]{timeframe}[/cyan] "
+                f"([green]{interval_minutes} min[/green])\n"
+                f"Window: [cyan]{window_desc}[/cyan]\n"
+                f"DB: [magenta]{DB_PATH_DEFAULT}[/magenta]",
+                title="OHLC Coverage Report",
+                border_style="blue",
+            )
+        )
+        
+        # Compute gaps and coverage from local store only
+        try:
+            gaps, summary = find_ohlc_gaps(
+                conn=conn,
+                pair=request_pair,
+                timeframe_minutes=interval_minutes,
+                start_ts=start_ts,
+                end_ts=end_ts,
+            )
+        except Exception as exc:
+            conn.close()
+            console.print(f"[red]❌ Coverage computation failed: {exc}[/red]")
+            return
+        
+        if output.lower() == "json":
+            payload: Dict[str, Any] = {
+                "pair": request_pair,
+                "timeframe": timeframe,
+                "window": {"start": start_ts, "end": end_ts},
+                "step_seconds": step_seconds,
+                "coverage": {
+                    "expected": int(summary.get("expected", 0.0)),
+                    "present": int(summary.get("present", 0.0)),
+                    "missing": int(summary.get("missing", 0.0)),
+                    "ratio": float(summary.get("coverage_ratio", 0.0)),
+                },
+                "gaps": gaps,
+            }
+            console.print(json.dumps(payload, indent=2))
+            conn.close()
+            return
+        
+        # Human-readable tables
+        coverage_table = Table(title="OHLC Coverage Summary")
+        coverage_table.add_column("Metric", style="cyan")
+        coverage_table.add_column("Value", style="green")
+        coverage_table.add_row("Expected", str(int(summary.get("expected", 0.0))))
+        coverage_table.add_row("Present", str(int(summary.get("present", 0.0))))
+        coverage_table.add_row("Missing", str(int(summary.get("missing", 0.0))))
+        coverage_table.add_row(
+            "Coverage Ratio",
+            f"{float(summary.get('coverage_ratio', 0.0)):.4f}",
+        )
+        console.print(coverage_table)
+        
+        gaps_table = Table(title="Detected Gaps", show_lines=False)
+        gaps_table.add_column("Start (UTC)", style="cyan")
+        gaps_table.add_column("End (UTC, excl.)", style="magenta")
+        gaps_table.add_column("Missing Candles", justify="right", style="yellow")
+        
+        def _fmt_ts(ts: int) -> str:
+            try:
+                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return str(ts)
+        
+        if not gaps:
+            console.print("[green]✅ No gaps detected in the selected window[/green]")
+        else:
+            for gap in gaps:
+                start_val = int(gap.get("start_ts", 0))
+                end_excl = int(gap.get("end_ts_exclusive", 0))
+                count = int(gap.get("missing_count", 0))
+                gaps_table.add_row(_fmt_ts(start_val), _fmt_ts(end_excl), str(count))
+            console.print(gaps_table)
+        
+        conn.close()
