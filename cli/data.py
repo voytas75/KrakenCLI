@@ -832,7 +832,6 @@ def register(
                 "[blue]ℹ️ Tips:[/blue] Use a larger timeframe (e.g., 1d has ~720 days), "
                 "or source historical data externally."
             )
-            conn.close()
             return
 
         if start_ts < retrievable_start:
