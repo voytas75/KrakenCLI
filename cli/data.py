@@ -462,6 +462,7 @@ def register(
 
         inserted_total = 0
         request_count = 0
+        last_public_call_ts = 0.0  # enforce ≤1 public req/sec for OHLC sync
         current_since = start_ts
         stall_count = 0
 
@@ -507,14 +508,23 @@ def register(
                 payload: Dict[str, Any] | None = None
 
                 while True:
+                    # Enforce Kraken public REST API limit: ≤1 request per second
+                    now_monotonic = time.monotonic()
+                    wait = max(0.0, 1.0 - (now_monotonic - last_public_call_ts))
+                    if wait > 0.0:
+                        time.sleep(wait)
                     try:
                         payload = api_client.get_ohlc_data(
                             pair=attempt_pair,
                             interval=interval_minutes,
                             since=current_since,
                         )
+                        request_count += 1
+                        last_public_call_ts = time.monotonic()
                         break
                     except Exception as exc:
+                        request_count += 1
+                        last_public_call_ts = time.monotonic()
                         msg = str(exc)
                         if (("Too many requests" in msg) or ("429" in msg)) and retries > 0:
                             console.print(
@@ -545,10 +555,7 @@ def register(
                     selected_pair = attempt_pair
                     break
 
-            # Count one request cycle (may include multiple candidate attempts)
-            request_count += 1
-            # Be polite to public API: small throttle even on success
-            time.sleep(1.05)
+            # Per-request throttle enforced above (1 req/sec); no extra cycle delay.
 
             if not selected_bars:
                 # Debug: explain absence of bars for current window/candidates
