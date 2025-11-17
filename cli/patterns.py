@@ -11,6 +11,7 @@ Responsibilities:
 - Follow existing CLI dependency initialisation/wiring patterns.
 
 Updates:
+    v0.9.16 - 2025-11-17 - Added local OHLC data source support to pattern-heatmap.
     v0.9.15 - 2025-11-16 - Added candlestick hammer and shooting star
         patterns in CLI.
     v0.9.14 - 2025-11-16 - Added MACD signal cross pattern support in CLI.
@@ -539,6 +540,20 @@ def register(
         type=click.IntRange(50, 5000),
         help="Number of days to look back when fetching OHLC candles.",
     )
+    @click.option(
+        "--source",
+        type=click.Choice(["api", "local"], case_sensitive=False),
+        default="api",
+        show_default=True,
+        help="OHLC data source: Kraken API or local SQLite store.",
+    )
+    @click.option(
+        "--db-path",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=Path("data/ohlc.db"),
+        show_default=True,
+        help="Path to local SQLite OHLC database (when --source=local).",
+    )
     @click.option("--force-refresh", is_flag=True, help="Bypass cached results.")
     @click.option(
         "--output",
@@ -558,6 +573,8 @@ def register(
         window: int,
         group_by: str,
         lookback: int,
+        source: str,
+        db_path: Path,
         force_refresh: bool,
         output: str,
     ) -> None:
@@ -579,6 +596,21 @@ def register(
             f"({timeframe}) — [cyan]{pattern_name}[/cyan][/bold blue]"
         )
 
+        # Optional local source validation
+        if source.lower() == "local":
+            try:
+                if not db_path.exists():
+                    console.print(
+                        f"[red]❌ Local OHLC DB not found at {db_path}[/red]"
+                    )
+                    console.print(
+                        "[yellow]Run 'kraken_cli.py data ohlc-sync' to backfill, "
+                        "or adjust --db-path[/yellow]"
+                    )
+                    raise click.Abort()
+            except Exception:
+                raise click.Abort()
+
         try:
             stats, matches, _snapshots = call_with_retries(
                 lambda: scanner.scan_pattern(
@@ -587,6 +619,8 @@ def register(
                     lookback,
                     pattern_name,
                     force_refresh=force_refresh,
+                    data_source=source.lower(),
+                    db_path=db_path if source.lower() == "local" else None,
                 ),
                 "Pattern scan",
                 display_label="⏳ Scanning pattern",
