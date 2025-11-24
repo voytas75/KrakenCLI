@@ -54,8 +54,8 @@ python tests/comprehensive_test.py
 
 ## Developer
 
-For contributor workflows, coding standards, configuration details, and troubleshooting steps, see `README-DEV.md`. Release notes are tracked in `docs/CHANGELOG.md`.
+For contributor workflows, coding standards, configuration details, and troubleshooting steps, see [README-DEV.md](README-DEV.md). Release notes are tracked in [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## License
 
-MIT License
+[MIT License](LICENSE)
