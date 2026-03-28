@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  fast-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate representative modules compile
+        run: |
+          python -m py_compile kraken_cli.py config.py api/kraken_client.py utils/helpers.py
+
+      - name: Run safe fast test subset
+        run: |
+          pytest -q tests/test_config_endpoint_weights.py tests/test_pair_resolution.py tests/test_utils_helpers.py tests/test_utils_logger.py
+
+      - name: Verify CLI help surface
+        run: |
+          python kraken_cli.py --help > /tmp/krakencli-help.txt
+          grep -q "Kraken Pro Trading CLI" /tmp/krakencli-help.txt
+          grep -q "ticker" /tmp/krakencli-help.txt
+          grep -q "portfolio" /tmp/krakencli-help.txt
+
+# Intentionally lightweight:
+# - validates config/helper/CLI front door without touching live Kraken trading flows
+# - optional feature warnings (for example missing pandas-backed patterns CLI) are acceptable in this bounded CI path
