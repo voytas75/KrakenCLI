@@ -1,10 +1,15 @@
-"""Test configuration providing pandas stubs when real dependency is missing."""
+"""Shared pytest configuration for CLI/test environment guards."""
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
+
+os.environ.setdefault("KRAKEN_API_KEY", "TESTKEY123")
+os.environ.setdefault("KRAKEN_API_SECRET", "TESTSECRET123")
+os.environ.setdefault("KRAKEN_SANDBOX", "true")
 
 
 try:  # pragma: no cover - executed only when pandas exists
