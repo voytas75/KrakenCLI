@@ -42,17 +42,17 @@ Ryzyko: średnie.
 ### PR 3 — scientific/runtime compatibility slice
 Cel: usunąć główny dług kompatybilności i przygotować repo pod nowsze Pythony.
 
-Zakres kandydacki:
-- `pandas==2.1.4 -> 2.3.x albo 3.0.x` (zacząć od najmniejszego sensownego skoku)
-- `scipy==1.12.0 -> nowsza kompatybilna linia`
-- `scikit-learn==1.5.0 -> nowsza kompatybilna linia`
+Zakres potwierdzony:
+- `pandas==2.1.4 -> 2.3.3`
+- `scipy==1.12.0 -> 1.16.3`
+- `scikit-learn==1.5.0 -> 1.7.2`
 
-Weryfikacja:
-- pełniejszy test suite
-- import/scenariusze w `analysis/`, `indicators/`, `strategies/`
-- potwierdzenie instalacji na Python 3.13
+Weryfikacja wykonana:
+- pełny test suite na Python 3.12: `132 passed, 1 warning`
+- import wheeli na Python 3.13: `pandas 2.3.3`, `scipy 1.16.3`, `scikit-learn 1.7.2`
+- root cause poprzedniej awarii: `pandas==2.1.4` nie wspiera Python 3.13 i wywala build C-extension na `_PyLong_AsByteArray`
 
-Ryzyko: wysokie.
+Ryzyko: średnie — potwierdzone lokalnie, ale nadal wymaga CI i review na GitHub.
 
 ## Potwierdzone obserwacje do użycia w PR-ach
 
