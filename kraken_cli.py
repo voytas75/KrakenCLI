@@ -686,22 +686,30 @@ def ticker(ctx, base, quote, pair):
 
 @cli.command()
 def config_setup():
-    """Setup configuration interactively"""
+    """Setup configuration interactively."""
     console.print("[bold blue]🛠️  Kraken API Configuration Setup[/bold blue]")
-    
-    api_key = click.prompt('Enter your Kraken API key', type=str, hide_input=True)
-    api_secret = click.prompt('Enter your Kraken API secret', type=str, hide_input=True)
+
+    click.prompt('Enter your Kraken API key', type=str, hide_input=True)
+    click.prompt('Enter your Kraken API secret', type=str, hide_input=True)
     sandbox = click.confirm('Use Kraken sandbox (test) environment?', default=False)
-    
-    # Save to .env file
+
     env_path = Path(__file__).parent / '.env'
-    with open(env_path, 'w') as f:
-        f.write(f"KRAKEN_API_KEY={api_key}\n")
-        f.write(f"KRAKEN_API_SECRET={api_secret}\n")
-        f.write(f"KRAKEN_SANDBOX={sandbox}\n")
-    
-    console.print("[green]✅ Configuration saved to .env file[/green]")
-    console.print("[yellow]⚠️  Keep your API credentials secure and never share them![/yellow]")
+    existing_lines: list[str] = []
+    if env_path.exists():
+        existing_lines = [
+            line
+            for line in env_path.read_text().splitlines()
+            if not line.startswith('KRAKEN_SANDBOX=')
+        ]
+
+    existing_lines.append(f"KRAKEN_SANDBOX={str(sandbox).lower()}")
+    env_path.write_text("\n".join(existing_lines) + "\n")
+
+    console.print("[green]✅ Sandbox preference saved to .env file[/green]")
+    console.print(
+        "[yellow]⚠️  API credentials were not written to disk. "
+        "Set KRAKEN_API_KEY and KRAKEN_API_SECRET via environment variables instead.[/yellow]"
+    )
 
 @cli.command()
 @click.option(
