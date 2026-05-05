@@ -263,7 +263,7 @@ class KrakenCliMockedTests(TestCase):
 
         self.assertEqual(result.exit_code, 0, msg=result.output)
         self.assertIn("Open Orders", result.output)
-        self.assertIn("ETHUSD", result.output)
+        self.assertIn("ETH/USD", result.output)
         self.assertIn("0.01300000", result.output)
 
     def test_withdraw_command_requires_confirmation(self) -> None:
