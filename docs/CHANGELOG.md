@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 - `run_tests.sh` now enforces ≥80% coverage via the coverage CLI.
 - Added `.coveragerc` to exclude optional automation and CLI utility modules from coverage calculations.
+- Upgraded dependency slices across runtime/UI/scientific stacks: `requests 2.33.1`, `PyYAML 6.0.3`, `schedule 1.2.2`, `rich 15.0.0`, `websockets 16.0`, `pandas 2.3.3`, `scipy 1.16.3`, `scikit-learn 1.7.2`.
+- Verified Python 3.13 installation compatibility for the scientific stack and stabilized CLI tests by seeding test credentials in `tests/conftest.py`.
 
 ### Planned
 - Expand automated trading test coverage (engine cycles, strategy signals, risk persistence).
