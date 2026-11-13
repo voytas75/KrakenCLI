@@ -12,4 +12,4 @@ schedule==1.2.2
 websockets==16.0
 scipy==1.16.3
 scikit-learn==1.7.2
-litellm==1.83.14
+litellm==1.100.4
