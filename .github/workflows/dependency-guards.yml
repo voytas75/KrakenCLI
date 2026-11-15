@@ -11,7 +11,7 @@ on:
 
 jobs:
   litellm-min-version:
-    name: Enforce LiteLLM minimum safe version
+    name: Dependency Guards / enforce minimum patched versions
     runs-on: ubuntu-latest
 
     steps:
